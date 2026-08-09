@@ -56,12 +56,36 @@ Four flows support the app. Build and test them in order — later flows assume 
 **Steps:**
 1. **Condition** — check trigger type isn't relevant here since we need the parent ID either way. For **create/modify**, `Document` field is present on the triggering item. For **delete**, the deleted item's `Document` lookup value is still available in the trigger outputs (SharePoint retains it in the delete trigger payload) — capture it into a variable immediately:
    - **Initialize variable** `DocumentId` (Integer) = `triggerOutputs()?['body/Document/Id']` (fallback to `triggerOutputs()?['body/DocumentId']` depending on connector version — check the dynamic content picker for the exact lookup ID token).
-2. **Get items** (SharePoint) — List: `DocumentLines`, Filter Query: `Document/Id eq {DocumentId}` (Odata), Select columns: `Amount`.
-   - This requires the `Document` lookup column to be indexed (done in the SharePoint guide) so the filter query is efficient.
-3. **Initialize variable** `RunningTotal` (Float) = `0`.
-4. **Apply to each** item in Get items output:
+2. **Send an HTTP request to SharePoint** — use this instead of **Get items** to retrieve the sibling line items. This avoids the `Get items` action's ODataQuery quirks with lookup-field filters (its `Filter Query` box sometimes needs the lookup's internal field name, which isn't always what the picker shows) and gives you direct control over the `$filter`/`$select` REST query.
+   - **Site Address:** your site (or environment variable)
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items?$filter=DocumentId eq @{variables('DocumentId')}&$select=Id,Amount`
+     - `DocumentId` here is the REST internal name for the lookup field's Id value (SharePoint auto-appends `Id` to a lookup column's internal name — confirm the exact internal name via `_api/web/lists(guid'...')/fields?$filter=Title eq 'Document'` if your column was created with a different internal name than `Document`).
+     - Use the `DocumentLines` list's GUID environment variable, matching the pattern used in Flow 1.
+   - **Headers:**
+     - `Accept`: `application/json;odata=nometadata`
+3. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')` (or your action's actual name), Schema (generate from a sample response, or use):
+   ```json
+   {
+     "type": "object",
+     "properties": {
+       "value": {
+         "type": "array",
+         "items": {
+           "type": "object",
+           "properties": {
+             "Id": { "type": "integer" },
+             "Amount": { "type": ["number", "null"] }
+           }
+         }
+       }
+     }
+   }
+   ```
+4. **Initialize variable** `RunningTotal` (Float) = `0`.
+5. **Apply to each** — Items: `body('Parse_JSON')?['value']`:
    - **Set variable** `RunningTotal` = `add(variables('RunningTotal'), coalesce(items('Apply_to_each')?['Amount'], 0))`
-5. **Update item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId`, Subtotal: `RunningTotal`, Total: `RunningTotal`.
+6. **Update item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId`, Subtotal: `RunningTotal`, Total: `RunningTotal`.
    - Wrap this Update item in a **Condition**: only run if `DocumentId` is not null/empty (guards against edge cases where a line item is created before `Document` is set, e.g. via API).
 
 **Concurrency setting:** On the trigger, set **Concurrency Control** to a degree > 1 (e.g. 20) so rapid successive line-item edits (adding several lines quickly in the app) don't queue up and slow down the UI feedback loop. Since updates are idempotent (recompute-from-scratch each time), concurrent runs are safe.
