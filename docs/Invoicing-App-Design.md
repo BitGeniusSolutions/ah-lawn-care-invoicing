@@ -53,7 +53,6 @@ Based on the sample InvoiceEstimates provided:
 | Subtotal | Currency | Calculated (Flow or Power Apps) from line items |
 | Total | Currency | Same as Subtotal — no tax tracked (services, not taxable products) |
 | Notes | Multiple lines | Footer/terms text, e.g. "Any extra work will be approved & billed..." |
-| PreparedBy | Person | Defaults to current user (Harold) |
 
 > Note: SharePoint calculated columns can't reference another list, so Subtotal/Total are best set by a small Power Automate flow (or Power Apps `Patch`) whenever line items change — see §4.
 

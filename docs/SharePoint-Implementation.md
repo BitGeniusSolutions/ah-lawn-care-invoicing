@@ -76,7 +76,6 @@ Create list → **InvoiceEstimates**. Rename `Title` display to **Doc Number** (
 | Subtotal | Currency | 2 decimals. **Do not** mark as calculated column — it's set by a Power Automate flow reading `DocumentLines`. |
 | Total | Currency | 2 decimals. Same value as Subtotal (no tax) — set by the same flow, kept as a separate column for clarity/future-proofing if tax is ever reintroduced. |
 | Notes | Multiple lines of text | Footer/terms text shown on the printed document |
-| Prepared By | Person or Group | Default: current user; single value |
 
 **Indexing:** Add an index on `Doc Type` and `Status` (List Settings → Indexed columns) — keeps filtered views/galleries fast as the list grows.
 
