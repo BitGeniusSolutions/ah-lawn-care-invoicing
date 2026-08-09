@@ -22,9 +22,10 @@ Four flows support the app. Build and test them in order — later flows assume 
    ```
    > `equals()` takes two arguments — the value to check and `'Estimate'` — then `if()`'s 2nd/3rd arguments are the true/false results. Replace `Get_item` with your actual action name if it differs (Power Automate uses underscores in place of spaces when referencing actions in expressions).
 3. **Send an HTTP request to SharePoint** — use this instead of the **Update item** action to set `Title`. `Update item` re-validates *all* required/mandatory fields on the row (even ones you're not touching) and can throw spurious "required field missing" errors on partially-saved items; a scoped HTTP PATCH only touches the field(s) you specify.
-   - **Site Address:** your site
+   - **Site Address:** your site (or environment variable, if you're using one for the site URL)
    - **Method:** `PATCH`
-   - **Uri:** `_api/web/lists/GetByTitle('InvoiceEstimates')/items(@{triggerOutputs()?['body/ID']})`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerOutputs()?['body/ID']})`
+     - Use the list's **GUID** (from your environment variable) rather than `GetByTitle('InvoiceEstimates')` — GUID-based references aren't affected by the list being renamed later and match the pattern you're already using elsewhere for site/list environment variables. Swap `variables('InvoiceEstimatesListId')` for however you reference that environment variable in this flow (e.g. `outputs('Get_environment_variable...')` if pulled via the Environment Variable connector, or `variables('...')` if copied into a variable at the top of the flow).
    - **Headers:**
      - `Accept`: `application/json;odata=nometadata`
      - `Content-Type`: `application/json;odata=nometadata`
