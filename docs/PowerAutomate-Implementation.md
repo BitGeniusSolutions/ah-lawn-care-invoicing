@@ -15,12 +15,31 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
 
 > Get each GUID from List Settings → scroll to the bottom → the `List=%7B...%7D` segment of the URL (URL-decode the `%7B`/`%7D` to `{`/`}` and drop the braces), or via `_api/web/lists/GetByTitle('ListName')?$select=Id` in a browser while signed in.
 
-**Standard headers by method:**
-| Method | Use for | Headers |
-|---|---|---|
-| GET | Read one/many items | `Accept: application/json;odata=nometadata` |
-| POST | Create an item | `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata` |
-| PATCH | Update an item | `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *` |
+**Standard headers by method** (paste directly into the action's Headers field — it accepts JSON):
+
+GET (read one/many items):
+```json
+{
+  "Accept": "application/json;odata=nometadata"
+}
+```
+
+POST (create an item):
+```json
+{
+  "Accept": "application/json;odata=nometadata",
+  "Content-Type": "application/json;odata=nometadata"
+}
+```
+
+PATCH (update an item):
+```json
+{
+  "Accept": "application/json;odata=nometadata",
+  "Content-Type": "application/json;odata=nometadata",
+  "IF-MATCH": "*"
+}
+```
 
 **Reading responses:** The HTTP action returns a raw JSON string body — follow every HTTP action with a **Parse JSON** action (`Content: body('<HTTP action name>')`) so downstream steps can reference fields normally instead of via manual string parsing. Generate each schema from a sample response the first time you run the action in test mode.
 
@@ -39,7 +58,12 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
    - **Site Address:** your site (or `variables('SiteUrl')`)
    - **Method:** `GET`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerOutputs()?['body/ID']})?$select=Id,DocType`
-   - **Headers:** `Accept: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema:
    ```json
    {
@@ -65,9 +89,13 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerOutputs()?['body/ID']})`
      - Use the list's **GUID** (from your environment variable) rather than `GetByTitle('InvoiceEstimates')` — GUID-based references aren't affected by the list being renamed later and match the pattern you're already using elsewhere for site/list environment variables. Swap `variables('InvoiceEstimatesListId')` for however you reference that environment variable in this flow (e.g. `outputs('Get_environment_variable...')` if pulled via the Environment Variable connector, or `variables('...')` if copied into a variable at the top of the flow).
    - **Headers:**
-     - `Accept`: `application/json;odata=nometadata`
-     - `Content-Type`: `application/json;odata=nometadata`
-     - `IF-MATCH`: `*`
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata",
+       "Content-Type": "application/json;odata=nometadata",
+       "IF-MATCH": "*"
+     }
+     ```
    - **Body:**
      ```json
      {
@@ -101,7 +129,11 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
      - `DocumentId` here is the REST internal name for the lookup field's Id value (SharePoint auto-appends `Id` to a lookup column's internal name — confirm the exact internal name via `_api/web/lists(guid'...')/fields?$filter=Title eq 'Document'` if your column was created with a different internal name than `Document`).
      - Use the `DocumentLines` list's GUID environment variable, matching the pattern used in Flow 1.
    - **Headers:**
-     - `Accept`: `application/json;odata=nometadata`
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 3. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')` (or your action's actual name), Schema (generate from a sample response, or use):
    ```json
    {
@@ -128,7 +160,14 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
    - **Site Address:** your site (or `variables('SiteUrl')`)
    - **Method:** `PATCH`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{variables('DocumentId')})`
-   - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata",
+       "Content-Type": "application/json;odata=nometadata",
+       "IF-MATCH": "*"
+     }
+     ```
    - **Body:**
      ```json
      {
@@ -151,12 +190,23 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
 1. **Send an HTTP request to SharePoint** — use this instead of **Get item** to fetch the source Estimate's header.
    - **Method:** `GET`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})?$select=Id,CustomerId,BillToSnapshot,ShipToSnapshot,PONumber,Notes,DocType`
-   - **Headers:** `Accept: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema generated from a sample response (properties: `Id` integer, `CustomerId` integer, `BillToSnapshot`/`ShipToSnapshot`/`PONumber`/`Notes`/`DocType` strings).
 3. **Send an HTTP request to SharePoint** — use this instead of **Create item** to create the new Invoice header.
    - **Method:** `POST`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items`
-   - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata",
+       "Content-Type": "application/json;odata=nometadata"
+     }
+     ```
    - **Body:**
      ```json
      {
@@ -177,13 +227,24 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
 5. **Send an HTTP request to SharePoint** — use this instead of **Get items** to retrieve the Estimate's line items.
    - **Method:** `GET`
    - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items?$filter=DocumentId eq @{triggerBody()['DocumentId']}&$select=Id,ServiceId,ItemLabel,Description,Qty,Rate,Amount,SortOrder`
-   - **Headers:** `Accept: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 6. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_2')`, Schema: array under `value` with `Id`, `ServiceId`, `ItemLabel`, `Description`, `Qty`, `Rate`, `Amount`, `SortOrder`.
 7. **Apply to each** — Items: `body('Parse_JSON_2')?['value']`:
    - **Send an HTTP request to SharePoint** — use this instead of **Create item** to clone each line onto the new Invoice.
      - **Method:** `POST`
      - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items`
-     - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`
+     - **Headers:**
+       ```json
+       {
+         "Accept": "application/json;odata=nometadata",
+         "Content-Type": "application/json;odata=nometadata"
+       }
+       ```
      - **Body:**
        ```json
        {
@@ -200,7 +261,14 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
 8. **Send an HTTP request to SharePoint** — use this instead of **Update item** to mark the original Estimate as converted.
    - **Method:** `PATCH`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})`
-   - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata",
+       "Content-Type": "application/json;odata=nometadata",
+       "IF-MATCH": "*"
+     }
+     ```
    - **Body:**
      ```json
      {
@@ -226,12 +294,22 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
 1. **Send an HTTP request to SharePoint** — use this instead of **Get item** to fetch the header.
    - **Method:** `GET`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})?$select=Id,Title,DocType,CustomerId,DocDate,DueDate,PONumber,Notes,Total`
-   - **Headers:** `Accept: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema generated from a sample response.
 3. **Send an HTTP request to SharePoint** — use this instead of **Get items** to fetch the line items, sorted server-side.
    - **Method:** `GET`
    - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items?$filter=DocumentId eq @{triggerBody()['DocumentId']}&$orderby=SortOrder asc&$select=Id,ItemLabel,Description,Qty,Rate,Amount`
-   - **Headers:** `Accept: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 4. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_1')`, Schema: array under `value`.
 5. **Populate a Word template** (Word Online / Power Automate action) using a `.docx` template stored in a SharePoint document library, with content controls for Customer, Dates, PO#, and a repeating table row bound to `body('Parse_JSON_1')?['value']`.
    - Build the template first: create a Word doc styled like the sample Estimate/Invoice, insert content controls (Developer tab → Insert Controls) named to match the flow's field mapping, and save it to a `Templates` library in the same site.
@@ -239,14 +317,31 @@ All SharePoint list read/write actions in these flows use **Send an HTTP request
 7. **Send an HTTP request to SharePoint** — use this instead of **Get item** on `Customers` to fetch the customer's email.
    - **Method:** `GET`
    - **Uri:** `_api/web/lists(guid'@{variables('CustomersListId')}')/items(@{body('Parse_JSON')?['CustomerId']})?$select=Id,Email`
-   - **Headers:** `Accept: application/json;odata=nometadata`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
 8. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_2')`, Schema: `{ "type": "object", "properties": { "Email": { "type": "string" } } }`.
 9. **Send an email (V2)** (Office 365 Outlook connector — not a SharePoint list action, left as-is) — To: `body('Parse_JSON_2')?['Email']`, Subject: `"@{body('Parse_JSON')?['DocType']} @{body('Parse_JSON')?['Title']} — A&H Lawn Care Services"`, Attachment: PDF from step 6.
 10. **Send an HTTP request to SharePoint** — use this instead of **Update item** to mark the document as sent.
     - **Method:** `PATCH`
     - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})`
-    - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *`
-    - **Body:** `{ "Status": "Sent" }`
+    - **Headers:**
+      ```json
+      {
+        "Accept": "application/json;odata=nometadata",
+        "Content-Type": "application/json;odata=nometadata",
+        "IF-MATCH": "*"
+      }
+      ```
+    - **Body:**
+      ```json
+      {
+        "Status": "Sent"
+      }
+      ```
 11. **Respond to PowerApps** — return success boolean.
 
 ---
