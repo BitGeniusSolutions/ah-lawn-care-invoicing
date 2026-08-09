@@ -448,22 +448,47 @@ In Power Apps, parse the returned `response` text with `ParseJSON()` and branch 
 **Trigger:** `PowerApps (V2)` trigger. No inputs needed — this flow always returns the full list; all filtering/searching happens client-side against the returned collection (see the Power Apps guide's Data Loading Pattern).
 
 **Steps (inside a `Try` scope):**
-1. **Send an HTTP request to SharePoint** — fetch all rows, expanding the `Customer` lookup so its display name comes back in the same call (avoids a separate lookup per row in the app).
-   - **Method:** `GET`
-   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items?$select=Id,Title,DocType,CustomerId,Customer/Title,DocDate,DueDate,PONumber,Status,Subtotal,Total,Notes&$expand=Customer&$orderby=DocDate desc&$top=5000`
-   - **Headers:**
-     ```json
-     {
-       "Accept": "application/json;odata=nometadata"
-     }
+1. **Initialize variable** `InvoiceEstimatesPageUrl` (String) — the first page's relative URI:
+   ```
+   concat(
+     "_api/web/lists(guid'", variables('InvoiceEstimatesListId'), "')/items?$select=Id,Title,DocType,CustomerId,Customer/Title,DocDate,DueDate,PONumber,Status,Subtotal,Total,Notes&$expand=Customer&$orderby=DocDate desc&$top=500"
+   )
+   ```
+2. **Initialize variable** `InvoiceEstimatesAll` (Array) = `[]`.
+3. **Do until** `InvoiceEstimatesPageUrl` is equal to `` (empty string) — this loops once per page of results:
+   - **Change limits:** bump **Count** to `100` (default 60) so the loop can't run out of iterations early on a larger list; leave the default `PT1H` timeout as-is. At 500 rows/page that's up to 50,000 rows — far beyond anything this app will ever hold, but cheap insurance.
+   - **Send an HTTP request to SharePoint** (inside the loop) — fetch the current page.
+     - **Method:** `GET`
+     - **Uri:** `@{variables('InvoiceEstimatesPageUrl')}`
+     - **Headers:**
+       ```json
+       {
+         "Accept": "application/json;odata=nometadata"
+       }
+       ```
+   - **Parse JSON** (inside the loop) — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema: an object with `value` (array of the row fields: `Id`, `Title`, `DocType`, `CustomerId`, `Customer` object with `Title`, `DocDate`, `DueDate`, `PONumber`, `Status`, `Subtotal`, `Total`, `Notes`) and `@odata.nextLink` (string, present only when there's another page).
+   - **Set variable** `InvoiceEstimatesAll` (inside the loop) — append this page's rows:
      ```
-   - `$top=5000` returns everything in a single page for a list of this size (a lawn care business's estimates/invoices won't approach that in years). If you ever expect more than ~5000 rows, this would need `$skiptoken`-based paging (an Apply-to-each loop following the `@odata.nextLink`) — not needed for this app.
-2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema: array under `value` with `Id`, `Title`, `DocType`, `CustomerId`, `Customer` (object with `Title`), `DocDate`, `DueDate`, `PONumber`, `Status`, `Subtotal`, `Total`, `Notes`.
-3. **Respond to PowerApps** — return a single output `response` (Text):
+     union(variables('InvoiceEstimatesAll'), body('Parse_JSON')?['value'])
+     ```
+   - **Set variable** `InvoiceEstimatesPageUrl` (inside the loop) — advance to the next page, or signal "done" with an empty string:
+     ```
+     if(
+       empty(body('Parse_JSON')?['@odata.nextLink']),
+       '',
+       substring(
+         body('Parse_JSON')?['@odata.nextLink'],
+         indexOf(body('Parse_JSON')?['@odata.nextLink'], '_api')
+       )
+     )
+     ```
+     SharePoint's `@odata.nextLink` is a full absolute URL (`https://yoursite.../_api/web/lists(...)/items?...&$skiptoken=...`), but the HTTP action's **Uri** field expects a path *relative to the site address*. This expression trims everything before `_api` so the next iteration's HTTP call gets a valid relative URI.
+     > The exact property name for the next-page link can vary slightly depending on OData format/version (`@odata.nextLink` is standard for `odata=nometadata`, but double-check the Parse JSON schema generated from your first test run and adjust the key here if yours differs).
+4. **Respond to PowerApps** (after the loop, still inside `Try`) — return a single output `response` (Text):
    ```json
    {
      "success": true,
-     "data": @{body('Parse_JSON')?['value']}
+     "data": @{variables('InvoiceEstimatesAll')}
    }
    ```
 
@@ -477,6 +502,8 @@ In Power Apps, parse the returned `response` text with `ParseJSON()` and branch 
 
 **Notes:**
 - `data` is a JSON array here (not a single object like Flows 3/4) — note the `[]` (not `""`) in the Catch response so Power Apps' `ForAll` over `.data` doesn't choke on an empty string when the flow fails.
+- Paging in 500-row pages via `Do until` + `@odata.nextLink` means this flow scales correctly no matter how large `InvoiceEstimates` grows — there's no arbitrary `$top` ceiling like a single-request approach would have. `union()` is used (rather than `Append to array variable`, which is for single items) because each iteration needs to merge in a whole array of rows at once.
+- If you'd rather not loop through every row on every load, you could later add `$filter=DocDate ge ...` to `InvoiceEstimatesPageUrl`'s initial value to only cache recent documents — not needed for this app's expected volume, but worth knowing the loop already accepts any `$filter` you add to the initial URI without changing the pagination logic itself.
 - See the "Standard response envelope" convention above for the `Try`/`Catch` scope pattern.
 - The Detail screen (section 5 of the Power Apps guide) still reads/writes `InvoiceEstimates` directly via `LookUp`/Form control for a single record — only the *list/search* screens route through this flow's cached collection. Keep this flow's `$select` list in sync if you add columns you want to filter/search/display in the list screen.
 
@@ -487,7 +514,7 @@ In Power Apps, parse the returned `response` text with `ParseJSON()` and branch 
 2. Build and test Flow 2 — manually add/edit/delete DocumentLines rows against your test Document, confirm Subtotal/Total update correctly, including after a delete.
 3. Build Flow 3 only once Power Apps has a working "Convert to Invoice" button to call it from (or test via Power Automate's built-in "Test" pane with a manually supplied `DocumentId`).
 4. Build Flow 4 last, once the app and core flows are stable — it depends on a Word template that takes extra design time.
-5. Build Flow 5 once you're ready to wire up `HomeScreen`/`DocumentListScreen` — test it via Power Automate's "Test" pane first and confirm the `response` output contains the expected array before wiring it into the app.
+5. Build Flow 5 once you're ready to wire up `HomeScreen`/`DocumentListScreen` — test it via Power Automate's "Test" pane first and confirm the `response` output contains the expected array before wiring it into the app. Temporarily lower the initial page's `$top` (e.g. `$top=2`) while testing so the `Do until` loop actually runs multiple iterations against your small test dataset, confirming the `@odata.nextLink` paging logic works before relying on it at full scale — then set `$top` back to `500`.
 
 ## Naming Convention
 Name flows clearly for future maintenance:
