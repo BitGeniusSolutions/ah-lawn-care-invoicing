@@ -311,22 +311,79 @@ PATCH (update an item):
      }
      ```
 4. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_1')`, Schema: array under `value`.
-5. **Populate a Word template** (Word Online / Power Automate action) using a `.docx` template stored in a SharePoint document library, with content controls for Customer, Dates, PO#, and a repeating table row bound to `body('Parse_JSON_1')?['value']`.
-   - Build the template first: create a Word doc styled like the sample Estimate/Invoice, insert content controls (Developer tab → Insert Controls) named to match the flow's field mapping, and save it to a `Templates` library in the same site.
-6. **Convert Word document to PDF** (built-in Power Automate action, no separate connector needed).
-7. **Create file** (SharePoint) — save the PDF to a document library so it has a stable, shareable URL. (This one native action is kept as-is rather than converted to raw HTTP — file/library uploads require multipart binary handling that the native connector manages for you far more simply than a raw HTTP PUT/POST would.)
-   - **Site Address:** your site
-   - **Folder Path:** `/GeneratedDocuments` (create this document library once, ahead of time)
-   - **File Name:** `@{body('Parse_JSON')?['Title']}.pdf` (e.g. `EST-0148.pdf` / `INV-2835.pdf`)
-   - **File Content:** output of step 6 (Convert Word document to PDF)
-   - Set **If file already exists** behavior to overwrite, so re-generating a PDF for the same document replaces the old copy rather than erroring or duplicating.
-8. **Respond to PowerApps** — return:
-   - `PdfUrl` (Text) = `concat(variables('SiteUrl'), '/GeneratedDocuments/', body('Parse_JSON')?['Title'], '.pdf')` — a direct link the app can open in a browser tab or PDF viewer control for viewing/downloading.
-   - `DocTitle` (Text) = `body('Parse_JSON')?['Title']` — handy for labeling the link/button in the app.
+5. **Initialize variable** `LineItemsHtml` (String) = `''`.
+6. **Apply to each** — Items: `body('Parse_JSON_1')?['value']`:
+   - **Set variable** `LineItemsHtml` = an expression appending one `<tr>` per line item:
+     ```
+     concat(
+         variables('LineItemsHtml'),
+         '<tr><td>', items('Apply_to_each')?['ItemLabel'], '</td><td>', items('Apply_to_each')?['Description'], '</td><td style="text-align:right">', string(items('Apply_to_each')?['Qty']), '</td><td style="text-align:right">$', formatNumber(items('Apply_to_each')?['Rate'], '0.00'), '</td><td style="text-align:right">$', formatNumber(items('Apply_to_each')?['Amount'], '0.00'), '</td></tr>'
+     )
+     ```
+7. **Compose** `DocumentHtml` — the full HTML document as a single multi-line text value with inline `@{}` expressions (type the HTML directly into the Compose action's Inputs box; it supports multi-line text with embedded expressions):
+   ```html
+   <html>
+   <head>
+   <style>
+     body { font-family: Arial, sans-serif; margin: 40px; }
+     h1 { font-size: 28px; }
+     table.header td { padding: 2px 8px 2px 0; vertical-align: top; }
+     table.lines { width: 100%; border-collapse: collapse; margin-top: 20px; }
+     table.lines th, table.lines td { border: 1px solid #ccc; padding: 6px 10px; font-size: 13px; }
+     table.lines th { background: #f2f2f2; text-align: left; }
+     .totals { margin-top: 10px; text-align: right; font-size: 14px; }
+     .totals .grand { font-weight: bold; font-size: 16px; }
+     .notes { margin-top: 30px; font-size: 12px; color: #444; }
+   </style>
+   </head>
+   <body>
+     <h1>@{body('Parse_JSON')?['DocType']}</h1>
+     <table class="header">
+       <tr><td><strong>@{body('Parse_JSON')?['DocType']} #</strong></td><td>@{body('Parse_JSON')?['Title']}</td></tr>
+       <tr><td><strong>Date</strong></td><td>@{formatDateTime(body('Parse_JSON')?['DocDate'], 'MM/dd/yy')}</td></tr>
+       <tr><td><strong>PO Number</strong></td><td>@{body('Parse_JSON')?['PONumber']}</td></tr>
+     </table>
+     <table class="lines">
+       <thead>
+         <tr><th>Item</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
+       </thead>
+       <tbody>
+         @{variables('LineItemsHtml')}
+       </tbody>
+     </table>
+     <div class="totals">
+       <div class="grand">Total: $@{formatNumber(body('Parse_JSON')?['Total'], '0.00')}</div>
+     </div>
+     <div class="notes">@{body('Parse_JSON')?['Notes']}</div>
+     <p>Thank you<br/>A&amp;H Lawn Care Services</p>
+   </body>
+   </html>
+   ```
+   > Adjust column widths/styling to taste — since this is plain HTML/CSS (not a Word content-control template), it's easy to tweak later to more closely match the paper layout without touching Word or the flow's data logic.
+8. **Create file** (OneDrive for Business connector) — save the HTML into the user's OneDrive.
+   - **Folder Path:** `/GeneratedDocuments` (create this folder once in OneDrive, ahead of time)
+   - **File Name:** `@{body('Parse_JSON')?['Title']}.html`
+   - **File Content:** `outputs('Compose_2')` (or your actual Compose action name from step 7)
+9. **Convert file using path** (OneDrive for Business connector) — converts the saved HTML to PDF via the same Microsoft Graph content-conversion service used for Office documents; HTML is a supported source format.
+   - **File Path:** `/GeneratedDocuments/@{body('Parse_JSON')?['Title']}.html`
+   - **Target type:** `pdf`
+   - This action returns the converted file's binary content directly — no Word Online license/connector needed.
+10. **Create file** (OneDrive for Business connector) — save the converted PDF back to OneDrive alongside the HTML.
+    - **Folder Path:** `/GeneratedDocuments`
+    - **File Name:** `@{body('Parse_JSON')?['Title']}.pdf`
+    - **File Content:** output of step 9 (Convert file using path)
+    - Set **If file already exists** behavior to overwrite, so re-generating a PDF for the same document replaces the old copy rather than erroring or duplicating.
+11. **Get file metadata using path** (OneDrive for Business connector) — Path: `/GeneratedDocuments/@{body('Parse_JSON')?['Title']}.pdf`. Retrieves the file's `WebUrl` (a direct link into OneDrive's web viewer) for step 12.
+    - Check the dynamic content picker for the exact output field name in your environment — it's typically `WebUrl` or `Link`.
+12. **Respond to PowerApps** — return:
+    - `PdfUrl` (Text) = `body('Get_file_metadata_using_path')?['WebUrl']` — a direct link the app can open for viewing/downloading.
+    - `DocTitle` (Text) = `body('Parse_JSON')?['Title']` — handy for labeling the link/button in the app.
 
 **Notes:**
 - No email step and no `Status` update — the app simply shows/opens the generated PDF; the user decides when and how to send or print it.
-- Because step 7 overwrites on re-run, clicking "Generate PDF" again after editing line items produces an up-to-date file at the same URL — no cleanup needed.
+- Building the source as HTML (instead of a `.docx` Word template with content controls) means the layout lives entirely in the flow as editable markup — no separate Word template file to maintain, and no Word Online connector/license dependency. Styling tweaks are just CSS edits inside the Compose action.
+- Because step 10 overwrites on re-run, clicking "Generate PDF" again after editing line items produces an up-to-date file at the same path/URL — no cleanup needed. If you don't want to keep the intermediate `.html` file around, add an optional **Delete file** (OneDrive for Business) step after step 10 targeting the `.html` path.
+- These file/conversion steps intentionally use the native **OneDrive for Business** connector actions rather than raw HTTP requests — binary upload/conversion payloads are handled far more simply by the connector than by hand-rolled HTTP calls, unlike the list-item CRUD actions elsewhere in these flows.
 - In Power Apps, wire the button that calls this flow to open the returned `PdfUrl` (e.g. `Launch(pdfUrl)` to open it in a new browser tab, where the user can view, print, or save/download it using their browser's built-in PDF controls) — see the Power Apps guide for the exact formula.
 
 ---

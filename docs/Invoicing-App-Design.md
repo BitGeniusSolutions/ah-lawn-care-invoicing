@@ -84,7 +84,7 @@ Based on the sample InvoiceEstimates provided:
    - "+ Add Line" button → `Patch(DocumentLines, Defaults(DocumentLines), {Document: header, SortOrder: count+1})`.
    - Delete icon per row → `Remove()`.
    - Footer label for Total computed live with `Sum()` over the filtered lines (and pushed to the header record on Save via Patch).
-6. **PDF/Print Screen** (optional) — A print-styled screen matching your paper layout, generated via Power Automate + Word template and stored in a SharePoint document library for the user to view/download from the app; printing or emailing to the customer is a manual step the user does afterward.
+6. **PDF/Print Screen** (optional) — A print-styled screen matching your paper layout, generated as HTML (built dynamically by a flow) and converted to PDF via OneDrive, stored in the user's OneDrive for the user to view/download from the app; printing or emailing to the customer is a manual step the user does afterward.
 
 ### Why hybrid instead of pure Form control everywhere
 The built-in Form control is 1 form = 1 list item, so it's perfect for Customers, Services, and the Document *header*. But an invoice needs an unknown number of line items, which forms can't repeat — that's inherently a one-to-many relationship, so a small custom gallery + Patch pattern is the standard, low-code way to handle it while keeping everything else simple.
@@ -95,7 +95,7 @@ The built-in Form control is 1 form = 1 list item, so it's perfect for Customers
 1. **On InvoiceEstimates create** — Generate sequential Title (EST-#### / INV-####) per DocType.
 2. **On DocumentLines create/update/delete** — Recalculate parent Document's Subtotal/Total (no tax to compute).
 3. **Convert Estimate → Invoice** (button-triggered) — Clone header + lines into a new Invoice-type Document, set LinkedDocument, set Estimate Status = Invoiced.
-4. **(Optional) Generate Document PDF** — Generate PDF (Word template) and save to a SharePoint document library; return a link the app opens for the user to view/download. No email is sent and no Status change — the user handles printing/sending manually.
+4. **(Optional) Generate Document PDF** — Build an HTML representation of the document, save it to the user's OneDrive, convert it to PDF (OneDrive's built-in HTML→PDF conversion), and return a link the app opens for the user to view/download. No email is sent and no Status change — the user handles printing/sending manually.
 
 ---
 
