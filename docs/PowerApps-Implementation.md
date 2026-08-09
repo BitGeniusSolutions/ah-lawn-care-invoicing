@@ -11,6 +11,9 @@ Build order and concrete formulas for the Canvas app. Connect all four SharePoin
    ```
    Set(varCurrentDoc, Blank());
    Set(varIsNewDoc, false);
+   Set(varFilterDocType, Blank());
+   Set(varFilterStatus, Blank());
+   Set(varFilterSince, Blank());
    ```
 4. Set a simple theme: App → Settings → color, or apply a Fluent theme for a clean, modern look. Not critical to function.
 
@@ -18,17 +21,91 @@ Build order and concrete formulas for the Canvas app. Connect all four SharePoin
 
 ## 1. HomeScreen
 
-Controls:
-- **Label** — Title "A&H Lawn Care Services — Estimates & Invoices"
-- **Gallery/Labels** — quick counts:
-  - Draft Estimates: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Estimate", Status.Value = "Draft"))`
-  - Open Invoices: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Invoice", Status.Value <> "Paid", Status.Value <> "Void"))`
-- **Buttons:**
-  - "New Estimate" → `Set(varIsNewDoc, true); Navigate(DocumentDetailScreen, ScreenTransition.Cover, {NewDocType: "Estimate"})`
-  - "New Invoice" → `Set(varIsNewDoc, true); Navigate(DocumentDetailScreen, ScreenTransition.Cover, {NewDocType: "Invoice"})`
-  - "Customers" → `Navigate(CustomerListScreen)`
-  - "Services" → `Navigate(ServiceListScreen)`
-  - "All Documents" → `Navigate(DocumentListScreen)`
+### 1.1 HTML header banner
+Add an **HTML text** control (`htmlHeader`) pinned at the top of the screen (Height: ~90-110px, Width: `Parent.Width`). The HTML text control renders a safe subset of HTML/CSS (no `<script>`, no external JS) — good enough for a styled banner without needing an image asset.
+
+- `HtmlText`:
+  ```
+  "<div style='display:flex;align-items:center;justify-content:space-between;height:100%;width:100%;margin:0;padding:0 24px;box-sizing:border-box;background:linear-gradient(90deg,#1e4d2b 0%,#2e7d32 60%,#4caf50 100%);font-family:Segoe UI,Arial,sans-serif;color:#ffffff;'>" &
+  "<div>" &
+    "<div style='font-size:22px;font-weight:600;letter-spacing:0.3px;'>A&amp;H Lawn Care Services</div>" &
+    "<div style='font-size:13px;opacity:0.85;margin-top:2px;'>Estimates &amp; Invoicing</div>" &
+  "</div>" &
+  "<div style='font-size:13px;opacity:0.9;text-align:right;'>" & Text(Today(), "dddd, mmmm d, yyyy") & "</div>" &
+  "</div>"
+  ```
+- Since `HtmlText` is a string property, build it with `&` concatenation (as above) rather than a raw multi-line literal, so `Text(Today(), ...)` can be embedded dynamically — Power Fx doesn't support `@{}` interpolation inside HTML text like Power Automate does. If you prefer a fully static banner, replace the date `Text(...)` piece with plain text and drop the concatenation.
+- Optional: swap the gradient colors for whatever green/brand shade you like — this is plain inline CSS, easy to retheme later without touching app logic.
+
+### 1.2 Dashboard cards
+Four equal-width card containers below the header, laid out in a horizontal container (or 4 separate containers with fixed `X`/`Width` if not using a layout container). Each card is a rectangle/container with a big number label, a caption label, and an `OnSelect` that drills into `DocumentListScreen` with a preset filter.
+
+Add two more context variables alongside `varFilterDocType` (used already by `DocumentListScreen`, see section 4) to support drill-down from these cards:
+- `varFilterStatus` (Text) — blank = no status filter.
+- `varFilterSince` (Date) — blank = no date filter; when set, `DocumentListScreen` shows only items with `DocDate >= varFilterSince`.
+
+Update `App.OnStart` to initialize them alongside the existing variables:
+```
+Set(varCurrentDoc, Blank());
+Set(varIsNewDoc, false);
+Set(varFilterDocType, Blank());
+Set(varFilterStatus, Blank());
+Set(varFilterSince, Blank());
+```
+
+**Card 1 — Drafts**
+- Count label `Text`: `CountRows(Filter(InvoiceEstimates, Status.Value = "Draft"))`
+- Caption label `Text`: `"Drafts"`
+- `OnSelect`:
+  ```
+  Set(varFilterDocType, Blank());
+  Set(varFilterStatus, "Draft");
+  Set(varFilterSince, Blank());
+  Navigate(DocumentListScreen, ScreenTransition.Cover)
+  ```
+
+**Card 2 — Open Invoices**
+- Count label `Text`: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Invoice", Status.Value <> "Paid", Status.Value <> "Void"))`
+- Caption label `Text`: `"Open Invoices"`
+- `OnSelect`:
+  ```
+  Set(varFilterDocType, "Invoice");
+  Set(varFilterStatus, Blank());
+  Set(varFilterSince, Blank());
+  Navigate(DocumentListScreen, ScreenTransition.Cover)
+  ```
+  > "Open" here means not `Paid`/`Void`; the list screen itself doesn't need a separate status filter for this case since it's really a Doc Type + exclusion rule best expressed on the list screen's own default view. If you want the card to strictly hand off its own definition of "open," instead pass both `varFilterDocType = "Invoice"` and skip `varFilterStatus`, and add an `Open Invoices` toggle option alongside the Estimate/Invoice/All tabs on `DocumentListScreen`.
+
+**Card 3 — Recent Estimates (last 30 days)**
+- Count label `Text`: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Estimate", DocDate >= Today() - 30))`
+- Caption label `Text`: `"Recent Estimates (30 days)"`
+- `OnSelect`:
+  ```
+  Set(varFilterDocType, "Estimate");
+  Set(varFilterStatus, Blank());
+  Set(varFilterSince, Today() - 30);
+  Navigate(DocumentListScreen, ScreenTransition.Cover)
+  ```
+
+**Card 4 — Recent Invoices (last 30 days)**
+- Count label `Text`: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Invoice", DocDate >= Today() - 30))`
+- Caption label `Text`: `"Recent Invoices (30 days)"`
+- `OnSelect`:
+  ```
+  Set(varFilterDocType, "Invoice");
+  Set(varFilterStatus, Blank());
+  Set(varFilterSince, Today() - 30);
+  Navigate(DocumentListScreen, ScreenTransition.Cover)
+  ```
+
+Styling tip: give each card container a `Fill` of white, `BorderRadius` ~8, a subtle `DropShadow`, the count label large/bold (~36px) in the brand green (`#2e7d32`), and the caption label smaller/gray beneath it. Set each card's `Hover.Fill` slightly darker and `OnSelect` as above so the whole card is clickable, not just a button inside it.
+
+### 1.3 Buttons
+- "New Estimate" → `Set(varIsNewDoc, true); Navigate(DocumentDetailScreen, ScreenTransition.Cover, {NewDocType: "Estimate"})`
+- "New Invoice" → `Set(varIsNewDoc, true); Navigate(DocumentDetailScreen, ScreenTransition.Cover, {NewDocType: "Invoice"})`
+- "Customers" → `Navigate(CustomerListScreen)`
+- "Services" → `Navigate(ServiceListScreen)`
+- "All Documents" → `Set(varFilterDocType, Blank()); Set(varFilterStatus, Blank()); Set(varFilterSince, Blank()); Navigate(DocumentListScreen)`
 
 ---
 
@@ -72,11 +149,17 @@ This is the "pure form control" pattern — repeat identically for Services.
 - **Gallery**, `Items`:
   ```
   SortByColumns(
-    Filter(InvoiceEstimates, 'Doc Type'.Value = varFilterDocType Or IsBlank(varFilterDocType)),
+    Filter(
+      InvoiceEstimates,
+      ('Doc Type'.Value = varFilterDocType Or IsBlank(varFilterDocType)),
+      (Status.Value = varFilterStatus Or IsBlank(varFilterStatus)),
+      (DocDate >= varFilterSince Or IsBlank(varFilterSince))
+    ),
     "DocDate", SortOrder.Descending
   )
   ```
-- Add a toggle/tab control at top to set `varFilterDocType` to `"Estimate"`, `"Invoice"`, or blank (All).
+  `varFilterStatus` and `varFilterSince` let the HomeScreen dashboard cards (section 1.2) drill into a pre-filtered list; when navigating here any other way, reset them to `Blank()` first (e.g. the "All Documents" button in section 1.3) so stale filters don't linger.
+- Add a toggle/tab control at top to set `varFilterDocType` to `"Estimate"`, `"Invoice"`, or blank (All) — also clear `varFilterStatus`/`varFilterSince` when the user manually changes this toggle, since it represents starting a fresh filter.
 - Show per row: Doc Number (Title), Customer.Value, Doc Date, Status, Total.
 - `OnSelect`: `Set(varCurrentDoc, ThisItem); Set(varIsNewDoc, false); Navigate(DocumentDetailScreen, ScreenTransition.Cover)`
 - "New Estimate"/"New Invoice" buttons same as HomeScreen.
