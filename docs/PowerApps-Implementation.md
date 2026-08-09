@@ -159,19 +159,30 @@ This is the "pure form control" pattern — repeat identically for Services.
 - Visible: `varCurrentDoc.'Doc Type'.Value = "Estimate" And varCurrentDoc.Status.Value <> "Invoiced"`
 - `OnSelect`:
   ```
-  Set(varConvertResult, 'DOC - Convert Estimate to Invoice'.Run(varCurrentDoc.ID));
-  Set(varCurrentDoc, LookUp(InvoiceEstimates, ID = varConvertResult.NewInvoiceId));
-  Navigate(DocumentDetailScreen, ScreenTransition.Cover)
+  Set(varConvertRaw, 'DOC - Convert Estimate to Invoice'.Run(varCurrentDoc.ID));
+  Set(varConvertResult, ParseJSON(varConvertRaw.response));
+  If(
+      Boolean(varConvertResult.success),
+      Set(varCurrentDoc, LookUp(InvoiceEstimates, ID = Value(varConvertResult.data.NewInvoiceId)));
+      Navigate(DocumentDetailScreen, ScreenTransition.Cover),
+      Notify("Couldn't convert this Estimate to an Invoice. Please try again.", NotificationType.Error)
+  )
   ```
   (Add the Power Automate flow as a data source first: **Power Automate** pane → Add flow → select `DOC - Convert Estimate to Invoice`.)
+  - The flow returns a single `response` text output shaped `{ success, data }` (see Power Automate guide's "Standard response envelope" convention, and Flow 3's Try/Catch scopes). `ParseJSON` turns it into an untyped object; wrap numeric fields in `Value()` and text fields in `Text()` when reading them out of `.data`.
 
 ### 5.4 Generate PDF button (optional, once Flow 4 exists)
 - `OnSelect`:
   ```
-  Set(varPdfResult, 'DOC - Generate Document PDF'.Run(varCurrentDoc.ID));
-  Launch(varPdfResult.PdfUrl)
+  Set(varPdfRaw, 'DOC - Generate Document PDF'.Run(varCurrentDoc.ID));
+  Set(varPdfResult, ParseJSON(varPdfRaw.response));
+  If(
+      Boolean(varPdfResult.success),
+      Launch(Text(varPdfResult.data.pdfURL)),
+      Notify("Couldn't generate the PDF. Please try again.", NotificationType.Error)
+  )
   ```
-  `Launch()` opens the PDF's SharePoint library URL in a new browser tab/window, where the user can view it and use their browser's built-in controls to print, download, or save it — the app itself does no emailing or status changes; the flow doesn't touch `Status`.
+  `Launch()` opens the PDF's OneDrive sharing link in a new browser tab/window, where the user can view it and use their browser's built-in controls to print, download, or save it — the app itself does no emailing or status changes; the flow doesn't touch `Status`. As with 5.3, the flow returns `{ success, data }` as a JSON string in `response` — check `.success` before trusting `.data.pdfURL`/`.data.docTitle`.
 
 ---
 

@@ -45,6 +45,27 @@ PATCH (update an item):
 
 **Lookup fields in REST:** A SharePoint lookup column named e.g. `Customer` exposes its id in REST as `CustomerId` (SharePoint appends `Id` to the internal name) — use that suffixed name in `$select`, `$filter`, and JSON request bodies. Confirm exact internal names via `_api/web/lists(guid'...')/fields?$select=InternalName,Title`. **Choice fields** (like `DocType`, `Status`) return as a plain string in REST (e.g. `"DocType": "Estimate"`) — no `/Value` needed, unlike the native connector's output shape.
 
+**Standard response envelope (Flows 3 & 4 — flows that return data to Power Apps):** Wrap the flow's main steps in a **Scope** named e.g. `Try`, and add a second **Scope** named `Catch` configured to run **after** `Try` has `failed, timed out, or is skipped` (Run After settings on the Catch scope). Each scope ends with its own **Respond to PowerApps** action returning a single output named `response` (Text), built as a JSON string via `Compose` + `string()` (or by typing the JSON directly into the Respond action's text output field, since Respond to PowerApps outputs are plain text):
+
+- **On success** (last step inside `Try`):
+  ```json
+  {
+    "success": true,
+    "data": {
+      "...": "..."
+    }
+  }
+  ```
+- **On failure** (only step inside `Catch`):
+  ```json
+  {
+    "success": false,
+    "data": ""
+  }
+  ```
+
+In Power Apps, parse the returned `response` text with `ParseJSON()` and branch on `.success` before reading `.data.*` — see the Power Apps guide for the exact formula. This gives the app a consistent shape to check regardless of which failure mode occurred inside the flow, instead of the flow simply erroring and Power Apps having to interpret a raw HTTP failure.
+
 ---
 
 ## Flow 1: Generate Document Number on Create
@@ -277,10 +298,27 @@ PATCH (update an item):
      }
      ```
      — cross-links both directions (original Estimate → new Invoice, and new Invoice → original Estimate, set in step 3).
-9. **Respond to PowerApps** — return `NewInvoiceId` (Number) = `body('Parse_JSON_1')?['Id']` so the app can navigate straight to the new invoice.
+9. **Respond to PowerApps** — return a single output `response` (Text) so the app can navigate straight to the new invoice:
+   ```json
+   {
+     "success": true,
+     "data": {
+       "NewInvoiceId": @{body('Parse_JSON_1')?['Id']}
+     }
+   }
+   ```
+
+**Steps 1–9 above run inside a `Try` scope.** Add a sibling `Catch` scope (Run After: `Try` has failed, timed out, or is skipped) containing its own **Respond to PowerApps** returning:
+```json
+{
+  "success": false,
+  "data": ""
+}
+```
 
 **Notes:**
 - Flow 2 (totals recalculation) will fire automatically as each new `DocumentLines` item is created in step 7 — no need to manually copy Subtotal/Total; they'll self-populate. If you want to avoid N redundant recalculation runs during the copy, you can instead directly copy `Subtotal`/`Total` from the Estimate into step 3's body as a shortcut, accepting Flow 2 will simply confirm the same value once the last line is created.
+- See the "Standard response envelope" convention above for the `Try`/`Catch` scope pattern.
 
 ---
 
@@ -373,18 +411,33 @@ PATCH (update an item):
     - **File Name:** `@{body('Parse_JSON')?['Title']}.pdf`
     - **File Content:** output of step 9 (Convert file using path)
     - Set **If file already exists** behavior to overwrite, so re-generating a PDF for the same document replaces the old copy rather than erroring or duplicating.
-11. **Get file metadata using path** (OneDrive for Business connector) — Path: `/GeneratedDocuments/@{body('Parse_JSON')?['Title']}.pdf`. Retrieves the file's `WebUrl` (a direct link into OneDrive's web viewer) for step 12.
-    - Check the dynamic content picker for the exact output field name in your environment — it's typically `WebUrl` or `Link`.
-12. **Respond to PowerApps** — return:
-    - `PdfUrl` (Text) = `body('Get_file_metadata_using_path')?['WebUrl']` — a direct link the app can open for viewing/downloading.
-    - `DocTitle` (Text) = `body('Parse_JSON')?['Title']` — handy for labeling the link/button in the app.
+11. **Create Link** (OneDrive for Business connector — "Create a sharing link for a file") — Path: `/GeneratedDocuments/@{body('Parse_JSON')?['Title']}.pdf`, Link type: `View`. Returns a `link.webUrl` — more reliable for direct browser viewing than the raw item path from "Get file metadata using path".
+12. **Respond to PowerApps** — return a single output `response` (Text):
+    ```json
+    {
+      "success": true,
+      "data": {
+        "pdfURL": "@{outputs('Create_Link_|_DocumentPDF')?['body/link/webUrl']}",
+        "docTitle": "@{body('Parse_JSON')?['Title']}"
+      }
+    }
+    ```
+
+**Steps 1–12 above run inside a `Try` scope.** Add a sibling `Catch` scope (Run After: `Try` has failed, timed out, or is skipped) containing its own **Respond to PowerApps** returning:
+```json
+{
+  "success": false,
+  "data": ""
+}
+```
 
 **Notes:**
 - No email step and no `Status` update — the app simply shows/opens the generated PDF; the user decides when and how to send or print it.
 - Building the source as HTML (instead of a `.docx` Word template with content controls) means the layout lives entirely in the flow as editable markup — no separate Word template file to maintain, and no Word Online connector/license dependency. Styling tweaks are just CSS edits inside the Compose action.
 - Because step 10 overwrites on re-run, clicking "Generate PDF" again after editing line items produces an up-to-date file at the same path/URL — no cleanup needed. If you don't want to keep the intermediate `.html` file around, add an optional **Delete file** (OneDrive for Business) step after step 10 targeting the `.html` path.
 - These file/conversion steps intentionally use the native **OneDrive for Business** connector actions rather than raw HTTP requests — binary upload/conversion payloads are handled far more simply by the connector than by hand-rolled HTTP calls, unlike the list-item CRUD actions elsewhere in these flows.
-- In Power Apps, wire the button that calls this flow to open the returned `PdfUrl` (e.g. `Launch(pdfUrl)` to open it in a new browser tab, where the user can view, print, or save/download it using their browser's built-in PDF controls) — see the Power Apps guide for the exact formula.
+- See the "Standard response envelope" convention above for the `Try`/`Catch` scope pattern.
+- In Power Apps, parse the returned `response` text with `ParseJSON()`, check `.success`, then read `.data.pdfURL`/`.data.docTitle` — see the Power Apps guide for the exact formula.
 
 ---
 
