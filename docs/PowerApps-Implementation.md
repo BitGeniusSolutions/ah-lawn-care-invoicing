@@ -1,6 +1,6 @@
 # Power Apps Implementation Guide — A&H Lawn Care Invoicing
 
-Build order and concrete formulas for the Canvas app. Connect all four SharePoint lists (`Customers`, `Services`, `Documents`, `DocumentLines`) as data sources before starting.
+Build order and concrete formulas for the Canvas app. Connect all four SharePoint lists (`Customers`, `Services`, `InvoiceEstimates`, `DocumentLines`) as data sources before starting.
 
 ---
 
@@ -21,8 +21,8 @@ Build order and concrete formulas for the Canvas app. Connect all four SharePoin
 Controls:
 - **Label** — Title "A&H Lawn Care Services — Estimates & Invoices"
 - **Gallery/Labels** — quick counts:
-  - Draft Estimates: `CountRows(Filter(Documents, 'Doc Type'.Value = "Estimate", Status.Value = "Draft"))`
-  - Open Invoices: `CountRows(Filter(Documents, 'Doc Type'.Value = "Invoice", Status.Value <> "Paid", Status.Value <> "Void"))`
+  - Draft Estimates: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Estimate", Status.Value = "Draft"))`
+  - Open Invoices: `CountRows(Filter(InvoiceEstimates, 'Doc Type'.Value = "Invoice", Status.Value <> "Paid", Status.Value <> "Void"))`
 - **Buttons:**
   - "New Estimate" → `Set(varIsNewDoc, true); Navigate(DocumentDetailScreen, ScreenTransition.Cover, {NewDocType: "Estimate"})`
   - "New Invoice" → `Set(varIsNewDoc, true); Navigate(DocumentDetailScreen, ScreenTransition.Cover, {NewDocType: "Invoice"})`
@@ -72,7 +72,7 @@ This is the "pure form control" pattern — repeat identically for Services.
 - **Gallery**, `Items`:
   ```
   SortByColumns(
-    Filter(Documents, 'Doc Type'.Value = varFilterDocType Or IsBlank(varFilterDocType)),
+    Filter(InvoiceEstimates, 'Doc Type'.Value = varFilterDocType Or IsBlank(varFilterDocType)),
     "DocDate", SortOrder.Descending
   )
   ```
@@ -87,12 +87,12 @@ This is the "pure form control" pattern — repeat identically for Services.
 
 ### 5.1 Header — Form control
 - **Form control** `frmDocument`:
-  - `DataSource`: `Documents`
+  - `DataSource`: `InvoiceEstimates`
   - `Item`:
     ```
     If(
       varIsNewDoc,
-      Patch(Defaults(Documents), {'Doc Type': {Value: NewDocType}, Status: {Value: "Draft"}, DocDate: Today()}),
+      Patch(Defaults(InvoiceEstimates), {'Doc Type': {Value: NewDocType}, Status: {Value: "Draft"}, DocDate: Today()}),
       varCurrentDoc
     )
     ```
@@ -153,14 +153,14 @@ This is the "pure form control" pattern — repeat identically for Services.
   )
   ```
 - **Footer total label** (live, before flow catches up): `Text: "Total: " & Text(Sum(Filter(DocumentLines, Document.Id = varCurrentDoc.ID), Amount), "[$-en-US]$#,##0.00")`
-  - This is a live client-side sum shown immediately; Power Automate Flow 2 (Recalculate Totals) will separately persist `Subtotal`/`Total` on the `Documents` record moments later so other views (galleries, PDF) stay in sync without the app needing to write those fields itself.
+  - This is a live client-side sum shown immediately; Power Automate Flow 2 (Recalculate Totals) will separately persist `Subtotal`/`Total` on the `InvoiceEstimates` record moments later so other views (galleries, PDF) stay in sync without the app needing to write those fields itself.
 
 ### 5.3 Convert to Invoice button (Estimates only)
 - Visible: `varCurrentDoc.'Doc Type'.Value = "Estimate" And varCurrentDoc.Status.Value <> "Invoiced"`
 - `OnSelect`:
   ```
   Set(varConvertResult, 'DOC - Convert Estimate to Invoice'.Run(varCurrentDoc.ID));
-  Set(varCurrentDoc, LookUp(Documents, ID = varConvertResult.NewInvoiceId));
+  Set(varCurrentDoc, LookUp(InvoiceEstimates, ID = varConvertResult.NewInvoiceId));
   Navigate(DocumentDetailScreen, ScreenTransition.Cover)
   ```
   (Add the Power Automate flow as a data source first: **Power Automate** pane → Add flow → select `DOC - Convert Estimate to Invoice`.)
@@ -186,7 +186,7 @@ HomeScreen ──▶ CustomerListScreen ──▶ CustomerFormScreen
 - [ ] Add 3–4 line items — confirm Amount calculates correctly per row, footer total matches sum
 - [ ] Edit a line item's Qty/Rate — confirm Amount and footer total update live
 - [ ] Delete a line item — confirm gallery updates and footer total recalculates
-- [ ] Wait a few seconds, refresh Documents list — confirm `Subtotal`/`Total` on the header match (Flow 2 working)
+- [ ] Wait a few seconds, refresh InvoiceEstimates list — confirm `Subtotal`/`Total` on the header match (Flow 2 working)
 - [ ] Click "Convert to Invoice" on a test Estimate — confirm new Invoice created with cloned lines, correct Doc Number prefix, `Linked Document` set both directions, original Estimate Status = `Invoiced`
 - [ ] (If built) Click "Send PDF" — confirm email arrives with correctly formatted PDF, Status updates to `Sent`
 

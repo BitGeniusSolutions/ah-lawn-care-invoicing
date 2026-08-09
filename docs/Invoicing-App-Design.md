@@ -3,7 +3,7 @@
 ## 1. Overview
 A simple Power Apps (Canvas app) backed by SharePoint lists to manage **Customers**, a **Service/Price list**, and **Estimates/Invoices** (with line items). Built around SharePoint **Form controls** for fast, low-maintenance CRUD, with a lightweight editable gallery for line items (the one place a plain form can't handle repeating rows).
 
-Based on the sample documents provided:
+Based on the sample InvoiceEstimates provided:
 - **Estimate #148** — Bill To (Customer + Property name), Date, line items (Item / Description / Qty / Rate / Amount), Subtotal, Tax %, Total.
 - **Invoice #2835** — Invoice #, Date, Due Date, Bill To, Ship To, P.O. Number, line items, Subtotal, Tax %, Total.
 
@@ -37,7 +37,7 @@ Based on the sample documents provided:
 | Description | Multiple lines | Optional boilerplate description |
 | Active | Yes/No | Default Yes |
 
-### 2.3 `Documents` (Estimate/Invoice header — one list for both types)
+### 2.3 `InvoiceEstimates` (Estimate/Invoice header — one list for both types)
 | Column | Type | Notes |
 |---|---|---|
 | Title | Single line text | Doc number, e.g. "EST-0148" / "INV-2835" (set by Power Automate on create) |
@@ -49,7 +49,7 @@ Based on the sample documents provided:
 | DueDate | Date only | Invoices only |
 | PONumber | Single line text | |
 | Status | Choice | Draft / Sent / Approved / Invoiced / Paid / Void (Approved & Invoiced apply to Estimates) |
-| LinkedDocument | Lookup → Documents | When an Estimate is converted to an Invoice, link back for traceability |
+| LinkedDocument | Lookup → InvoiceEstimates | When an Estimate is converted to an Invoice, link back for traceability |
 | Subtotal | Currency | Calculated (Flow or Power Apps) from line items |
 | Total | Currency | Same as Subtotal — no tax tracked (services, not taxable products) |
 | Notes | Multiple lines | Footer/terms text, e.g. "Any extra work will be approved & billed..." |
@@ -61,7 +61,7 @@ Based on the sample documents provided:
 | Column | Type | Notes |
 |---|---|---|
 | Title | Single line text | Optional short item name |
-| Document | Lookup → Documents | Parent header |
+| Document | Lookup → InvoiceEstimates | Parent header |
 | Service | Lookup → Services | Optional — pulls DefaultRate/Unit on selection |
 | ItemLabel | Single line text | e.g. "Annual Maintenance Contract", "Landscaping" |
 | Description | Multiple lines | Free text detail (matches the wrapped descriptions in your samples) |
@@ -78,7 +78,7 @@ Based on the sample documents provided:
 1. **HomeScreen** — Dashboard: counts of Draft estimates, Unpaid invoices; buttons to "New Estimate", "New Invoice", browse Customers/Services.
 2. **CustomerListScreen / CustomerFormScreen** — Standard SharePoint **Form control** (New/View/Edit) bound to `Customers`.
 3. **ServiceListScreen / ServiceFormScreen** — Standard **Form control** bound to `Services`.
-4. **DocumentListScreen** — Gallery of `Documents`, filterable by DocType/Status/Customer.
+4. **DocumentListScreen** — Gallery of `InvoiceEstimates`, filterable by DocType/Status/Customer.
 5. **DocumentDetailScreen** — **Form control** for the header fields (Customer, Date, PO#, Status, Notes) + a **line-items section** below:
    - Editable/scrollable gallery bound to `Filter(DocumentLines, Document.ID = ThisItem.ID)`, sorted by SortOrder.
    - Each row: Service combo box (optional), ItemLabel/Description text inputs, Qty, Rate, read-only Amount label.
@@ -93,7 +93,7 @@ The built-in Form control is 1 form = 1 list item, so it's perfect for Customers
 ---
 
 ## 4. Power Automate Flows (keep app logic thin)
-1. **On Documents create** — Generate sequential Title (EST-#### / INV-####) per DocType.
+1. **On InvoiceEstimates create** — Generate sequential Title (EST-#### / INV-####) per DocType.
 2. **On DocumentLines create/update/delete** — Recalculate parent Document's Subtotal/Total (no tax to compute).
 3. **Convert Estimate → Invoice** (button-triggered) — Clone header + lines into a new Invoice-type Document, set LinkedDocument, set Estimate Status = Invoiced.
 4. **(Optional) Send Invoice/Estimate PDF** — Generate PDF (Word template or Power Apps PDF export) and email to Customer.Email; update Status to Sent.
@@ -103,7 +103,7 @@ The built-in Form control is 1 form = 1 list item, so it's perfect for Customers
 ## 5. Build Order (suggested)
 1. Create the 4 SharePoint lists per schema above.
 2. Build Customers & Services screens (pure Form controls) — quick wins, validates the pattern.
-3. Build Documents list screens: gallery + header Form control.
+3. Build InvoiceEstimates list screens: gallery + header Form control.
 4. Add DocumentLines gallery/Patch logic on the detail screen.
 5. Add the numbering + totals-calculation flows.
 6. Add PDF export / email flow.
@@ -112,6 +112,6 @@ The built-in Form control is 1 form = 1 list item, so it's perfect for Customers
 ---
 
 ## 6. Confirmed Decisions
-- **Single `Documents` list** for both Estimates and Invoices, distinguished by `DocType`. Numbering (EST-#### / INV-####) handled per-type by the create flow (§4.1).
+- **Single `InvoiceEstimates` list** for both Estimates and Invoices, distinguished by `DocType`. Numbering (EST-#### / INV-####) handled per-type by the create flow (§4.1).
 - **No tax tracking** — these are services, not taxable products, so `TaxRatePct`/`TaxAmount` are omitted; `Total` simply mirrors `Subtotal`.
 - **Single-user app** — no role-based security, sharing, or per-crew filtering needed. Standard SharePoint list permissions (owner-only edit) are sufficient.

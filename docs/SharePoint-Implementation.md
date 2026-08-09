@@ -10,10 +10,10 @@ Step-by-step instructions for standing up the SharePoint site and lists that bac
 ## 1. Build Order
 1. `Customers`
 2. `Services`
-3. `Documents`
+3. `InvoiceEstimates`
 4. `DocumentLines`
 
-(Lookups require the target list to exist first, hence Customers/Services before Documents, and Documents before DocumentLines.)
+(Lookups require the target list to exist first, hence Customers/Services before InvoiceEstimates, and InvoiceEstimates before DocumentLines.)
 
 ---
 
@@ -57,9 +57,9 @@ Create list → **Services**. Rename `Title` display to **Service Name**.
 
 ---
 
-## 4. List: `Documents`
+## 4. List: `InvoiceEstimates`
 
-Create list → **Documents**. Rename `Title` display to **Doc Number** (this will be populated by a flow, not typed by users).
+Create list → **InvoiceEstimates**. Rename `Title` display to **Doc Number** (this will be populated by a flow, not typed by users).
 
 | Column (display name) | Internal type | Settings |
 |---|---|---|
@@ -72,7 +72,7 @@ Create list → **Documents**. Rename `Title` display to **Doc Number** (this wi
 | Due Date | Date only | Optional — Invoices only |
 | PO Number | Single line text | Optional |
 | Status | Choice | Values: `Draft`, `Sent`, `Approved`, `Invoiced`, `Paid`, `Void`. Default: `Draft`. |
-| Linked Document | Lookup | Source list: `Documents` (self-lookup), show column `Title`. Used when converting an Estimate to an Invoice. **Note:** SharePoint allows self-referencing lookups; create this column after the list already has at least one item, or SharePoint may block it until the list exists with data — if you hit this, create the column, save the list, then add the first Estimate. |
+| Linked Document | Lookup | Source list: `InvoiceEstimates` (self-lookup), show column `Title`. Used when converting an Estimate to an Invoice. **Note:** SharePoint allows self-referencing lookups; create this column after the list already has at least one item, or SharePoint may block it until the list exists with data — if you hit this, create the column, save the list, then add the first Estimate. |
 | Subtotal | Currency | 2 decimals. **Do not** mark as calculated column — it's set by a Power Automate flow reading `DocumentLines`. |
 | Total | Currency | 2 decimals. Same value as Subtotal (no tax) — set by the same flow, kept as a separate column for clarity/future-proofing if tax is ever reintroduced. |
 | Notes | Multiple lines of text | Footer/terms text shown on the printed document |
@@ -94,7 +94,7 @@ Create list → **DocumentLines**. Rename `Title` display to **Line Label** (opt
 | Column (display name) | Internal type | Settings |
 |---|---|---|
 | Line Label | Title (rename) | Optional — leave default text on create, not shown on the Power Apps line-item UI |
-| Document | Lookup | Source list: `Documents`, show column `Title`. Required. This is the parent/header link. |
+| Document | Lookup | Source list: `InvoiceEstimates`, show column `Title`. Required. This is the parent/header link. |
 | Service | Lookup | Source list: `Services`, show column `Title`. Optional. |
 | Item Label | Single line text | e.g. "Annual Maintenance Contract", "Landscaping" — required |
 | Description | Multiple lines of text | Plain text — free-form detail matching the wrapped description text seen on paper estimates |
@@ -118,7 +118,7 @@ Single-user app — keep it simple:
 ## 7. Post-Build Checklist
 - [ ] All 4 lists created in the correct order
 - [ ] All lookup columns point to the correct target list/column
-- [ ] `Doc Type`, `Status` indexed on `Documents`
+- [ ] `Doc Type`, `Status` indexed on `InvoiceEstimates`
 - [ ] `Document` lookup indexed on `DocumentLines`
 - [ ] Choice values match exactly what's referenced in the Power Automate and Power Apps guides (case-sensitive matching in formulas)
 - [ ] Default views created as described

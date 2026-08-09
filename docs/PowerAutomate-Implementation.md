@@ -6,16 +6,16 @@ Four flows support the app. Build and test them in order — later flows assume 
 
 ## Flow 1: Generate Document Number on Create
 
-**Purpose:** Auto-populate `Title` (Doc Number) as `EST-####` or `INV-####` right after a new `Documents` item is created, using the SharePoint auto-incrementing `ID` for uniqueness (no separate counter list needed, no race conditions).
+**Purpose:** Auto-populate `Title` (Doc Number) as `EST-####` or `INV-####` right after a new `InvoiceEstimates` item is created, using the SharePoint auto-incrementing `ID` for uniqueness (no separate counter list needed, no race conditions).
 
-**Trigger:** `When an item is created` — SharePoint connector, site: your site, list: `Documents`.
+**Trigger:** `When an item is created` — SharePoint connector, site: your site, list: `InvoiceEstimates`.
 
 **Steps:**
-1. **Get item** (SharePoint) — Site: same site, List: `Documents`, Id: `ID` from trigger. (Ensures you have the freshly-committed `Doc Type` value; avoids trigger payload timing issues.)
+1. **Get item** (SharePoint) — Site: same site, List: `InvoiceEstimates`, Id: `ID` from trigger. (Ensures you have the freshly-committed `Doc Type` value; avoids trigger payload timing issues.)
 2. **Condition** — `Doc Type` (from Get item) is equal to `Estimate`.
    - **If yes:** Compose `DocNumber` = `concat('EST-', formatNumber(triggerOutputs()?['body/ID'], '0000'))`
    - **If no:** Compose `DocNumber` = `concat('INV-', formatNumber(triggerOutputs()?['body/ID'], '0000'))`
-3. **Update item** (SharePoint) — Site/List: `Documents`, Id: `ID`, Title: output of the Compose from step 2.
+3. **Update item** (SharePoint) — Site/List: `InvoiceEstimates`, Id: `ID`, Title: output of the Compose from step 2.
 
 **Notes:**
 - Using the list's internal `ID` guarantees no duplicate numbers even with concurrent creates — no need for a locking/counter pattern.
@@ -26,7 +26,7 @@ Four flows support the app. Build and test them in order — later flows assume 
 
 ## Flow 2: Recalculate Document Totals
 
-**Purpose:** Whenever a line item is added, edited, or deleted, recompute the parent `Documents` record's `Subtotal` and `Total` (Total = Subtotal since there's no tax).
+**Purpose:** Whenever a line item is added, edited, or deleted, recompute the parent `InvoiceEstimates` record's `Subtotal` and `Total` (Total = Subtotal since there's no tax).
 
 **Trigger:** `When an item is created, modified, or deleted` — SharePoint connector, list: `DocumentLines`. (Use the combined trigger, or three separate triggers pointing to the same child flow logic if your Automate environment doesn't support the combined trigger — combined is preferred to keep it to one flow.)
 
@@ -38,7 +38,7 @@ Four flows support the app. Build and test them in order — later flows assume 
 3. **Initialize variable** `RunningTotal` (Float) = `0`.
 4. **Apply to each** item in Get items output:
    - **Set variable** `RunningTotal` = `add(variables('RunningTotal'), coalesce(items('Apply_to_each')?['Amount'], 0))`
-5. **Update item** (SharePoint) — List: `Documents`, Id: `DocumentId`, Subtotal: `RunningTotal`, Total: `RunningTotal`.
+5. **Update item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId`, Subtotal: `RunningTotal`, Total: `RunningTotal`.
    - Wrap this Update item in a **Condition**: only run if `DocumentId` is not null/empty (guards against edge cases where a line item is created before `Document` is set, e.g. via API).
 
 **Concurrency setting:** On the trigger, set **Concurrency Control** to a degree > 1 (e.g. 20) so rapid successive line-item edits (adding several lines quickly in the app) don't queue up and slow down the UI feedback loop. Since updates are idempotent (recompute-from-scratch each time), concurrent runs are safe.
@@ -52,8 +52,8 @@ Four flows support the app. Build and test them in order — later flows assume 
 **Trigger:** `PowerApps (V2)` trigger. Add one input parameter: `DocumentId` (Number) — the ID of the Estimate to convert.
 
 **Steps:**
-1. **Get item** (SharePoint) — List: `Documents`, Id: `DocumentId` (the Estimate).
-2. **Create item** (SharePoint) — List: `Documents`:
+1. **Get item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId` (the Estimate).
+2. **Create item** (SharePoint) — List: `InvoiceEstimates`:
    - `Doc Type` = `Invoice`
    - `Customer` = Customer Id from step 1
    - `Bill To Snapshot` = from step 1
@@ -70,7 +70,7 @@ Four flows support the app. Build and test them in order — later flows assume 
    - **Create item** (SharePoint) — List: `DocumentLines`:
      - `Document` = new Invoice's Id (from step 2)
      - `Service`, `Item Label`, `Description`, `Qty`, `Rate`, `Amount`, `Sort Order` = copy directly from the current line
-5. **Update item** (SharePoint) — List: `Documents`, Id: `DocumentId` (the original Estimate), `Status` = `Invoiced`, `Linked Document` = new Invoice's Id (from step 2) — cross-links both directions.
+5. **Update item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId` (the original Estimate), `Status` = `Invoiced`, `Linked Document` = new Invoice's Id (from step 2) — cross-links both directions.
 6. **Respond to PowerApps** — return `NewInvoiceId` (Number, from step 2's Id) so the app can navigate straight to the new invoice.
 
 **Notes:**
@@ -85,13 +85,13 @@ Four flows support the app. Build and test them in order — later flows assume 
 **Trigger:** `PowerApps (V2)` trigger, input: `DocumentId` (Number).
 
 **Steps:**
-1. **Get item** (SharePoint) — `Documents`, Id: `DocumentId`.
+1. **Get item** (SharePoint) — `InvoiceEstimates`, Id: `DocumentId`.
 2. **Get items** (SharePoint) — `DocumentLines`, Filter: `Document/Id eq {DocumentId}`, sorted by `Sort Order` (use `$orderby` in the ODataQuery if available, or sort in a subsequent **Apply to each** using a Compose + `sort` array function).
 3. **Populate a Word template** (Word Online / Power Automate action) using a `.docx` template stored in a SharePoint document library, with content controls for Customer, Dates, PO#, and a repeating table row bound to the line items collection.
    - Build the template first: create a Word doc styled like the sample Estimate/Invoice, insert content controls (Developer tab → Insert Controls) named to match the flow's field mapping, and save it to a `Templates` library in the same site.
 4. **Convert Word document to PDF** (built-in Power Automate action, no separate connector needed).
 5. **Send an email (V2)** (Office 365 Outlook connector) — To: `Customer.Email` (from a **Get item** on `Customers` using the Customer lookup Id), Subject: `"{Doc Type} {Doc Number} — A&H Lawn Care Services"`, Attachment: PDF from step 4.
-6. **Update item** (SharePoint) — `Documents`, Id: `DocumentId`, `Status` = `Sent`.
+6. **Update item** (SharePoint) — `InvoiceEstimates`, Id: `DocumentId`, `Status` = `Sent`.
 7. **Respond to PowerApps** — return success boolean.
 
 ---
