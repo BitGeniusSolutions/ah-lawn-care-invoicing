@@ -2,6 +2,30 @@
 
 Four flows support the app. Build and test them in order — later flows assume earlier ones exist and work.
 
+## Conventions Used Throughout This Guide
+
+All SharePoint list read/write actions in these flows use **Send an HTTP request to SharePoint** instead of the native `Get item(s)`/`Create item`/`Update item` actions (triggers are unaffected — they remain the native SharePoint trigger actions). This avoids `Update item`'s full-row required-field re-validation, gives direct control over `$filter`/`$select`/`$expand`, and is unaffected by lists being renamed later since it addresses lists by GUID.
+
+**Environment variables** (create these once, referenced by GUID across all flows):
+- `SiteUrl` — the site's absolute URL
+- `CustomersListId` — GUID of the `Customers` list
+- `ServicesListId` — GUID of the `Services` list
+- `InvoiceEstimatesListId` — GUID of the `InvoiceEstimates` list
+- `DocumentLinesListId` — GUID of the `DocumentLines` list
+
+> Get each GUID from List Settings → scroll to the bottom → the `List=%7B...%7D` segment of the URL (URL-decode the `%7B`/`%7D` to `{`/`}` and drop the braces), or via `_api/web/lists/GetByTitle('ListName')?$select=Id` in a browser while signed in.
+
+**Standard headers by method:**
+| Method | Use for | Headers |
+|---|---|---|
+| GET | Read one/many items | `Accept: application/json;odata=nometadata` |
+| POST | Create an item | `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata` |
+| PATCH | Update an item | `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *` |
+
+**Reading responses:** The HTTP action returns a raw JSON string body — follow every HTTP action with a **Parse JSON** action (`Content: body('<HTTP action name>')`) so downstream steps can reference fields normally instead of via manual string parsing. Generate each schema from a sample response the first time you run the action in test mode.
+
+**Lookup fields in REST:** A SharePoint lookup column named e.g. `Customer` exposes its id in REST as `CustomerId` (SharePoint appends `Id` to the internal name) — use that suffixed name in `$select`, `$filter`, and JSON request bodies. Confirm exact internal names via `_api/web/lists(guid'...')/fields?$select=InternalName,Title`. **Choice fields** (like `DocType`, `Status`) return as a plain string in REST (e.g. `"DocType": "Estimate"`) — no `/Value` needed, unlike the native connector's output shape.
+
 ---
 
 ## Flow 1: Generate Document Number on Create
@@ -11,17 +35,31 @@ Four flows support the app. Build and test them in order — later flows assume 
 **Trigger:** `When an item is created` — SharePoint connector, site: your site, list: `InvoiceEstimates`.
 
 **Steps:**
-1. **Get item** (SharePoint) — Site: same site, List: `InvoiceEstimates`, Id: `ID` from trigger. (Ensures you have the freshly-committed `Doc Type` value; avoids trigger payload timing issues.)
-2. **Compose** `DocNumber` — a single expression (no separate Condition action needed) using `if()`:
+1. **Send an HTTP request to SharePoint** — use this instead of **Get item** to fetch the freshly-committed `DocType` value (avoids trigger payload timing issues).
+   - **Site Address:** your site (or `variables('SiteUrl')`)
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerOutputs()?['body/ID']})?$select=Id,DocType`
+   - **Headers:** `Accept: application/json;odata=nometadata`
+2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema:
+   ```json
+   {
+     "type": "object",
+     "properties": {
+       "Id": { "type": "integer" },
+       "DocType": { "type": "string" }
+     }
+   }
+   ```
+3. **Compose** `DocNumber` — a single expression (no separate Condition action needed) using `if()`:
    ```
    if(
-       equals(outputs('Get_item')?['body/DocType/Value'], 'Estimate'),
+       equals(body('Parse_JSON')?['DocType'], 'Estimate'),
        concat('EST-', formatNumber(triggerOutputs()?['body/ID'], '0000')),
        concat('INV-', formatNumber(triggerOutputs()?['body/ID'], '0000'))
    )
    ```
-   > `equals()` takes two arguments — the value to check and `'Estimate'` — then `if()`'s 2nd/3rd arguments are the true/false results. Replace `Get_item` with your actual action name if it differs (Power Automate uses underscores in place of spaces when referencing actions in expressions).
-3. **Send an HTTP request to SharePoint** — use this instead of the **Update item** action to set `Title`. `Update item` re-validates *all* required/mandatory fields on the row (even ones you're not touching) and can throw spurious "required field missing" errors on partially-saved items; a scoped HTTP PATCH only touches the field(s) you specify.
+   > `equals()` takes two arguments — the value to check and `'Estimate'` — then `if()`'s 2nd/3rd arguments are the true/false results. Note `DocType` is read as a plain string here (REST Choice field shape), not `.../Value` as the native connector would return it.
+4. **Send an HTTP request to SharePoint** — use this instead of the **Update item** action to set `Title`. `Update item` re-validates *all* required/mandatory fields on the row (even ones you're not touching) and can throw spurious "required field missing" errors on partially-saved items; a scoped HTTP PATCH only touches the field(s) you specify.
    - **Site Address:** your site (or environment variable, if you're using one for the site URL)
    - **Method:** `PATCH`
    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerOutputs()?['body/ID']})`
@@ -85,8 +123,19 @@ Four flows support the app. Build and test them in order — later flows assume 
 4. **Initialize variable** `RunningTotal` (Float) = `0`.
 5. **Apply to each** — Items: `body('Parse_JSON')?['value']`:
    - **Set variable** `RunningTotal` = `add(variables('RunningTotal'), coalesce(items('Apply_to_each')?['Amount'], 0))`
-6. **Update item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId`, Subtotal: `RunningTotal`, Total: `RunningTotal`.
-   - Wrap this Update item in a **Condition**: only run if `DocumentId` is not null/empty (guards against edge cases where a line item is created before `Document` is set, e.g. via API).
+6. **Condition** — only proceed if `DocumentId` is not null/empty (guards against edge cases where a line item is created before `Document` is set, e.g. via API).
+7. **Send an HTTP request to SharePoint** (inside the Condition's Yes branch) — use this instead of **Update item** to persist the recalculated totals.
+   - **Site Address:** your site (or `variables('SiteUrl')`)
+   - **Method:** `PATCH`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{variables('DocumentId')})`
+   - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *`
+   - **Body:**
+     ```json
+     {
+       "Subtotal": @{variables('RunningTotal')},
+       "Total": @{variables('RunningTotal')}
+     }
+     ```
 
 **Concurrency setting:** On the trigger, set **Concurrency Control** to a degree > 1 (e.g. 20) so rapid successive line-item edits (adding several lines quickly in the app) don't queue up and slow down the UI feedback loop. Since updates are idempotent (recompute-from-scratch each time), concurrent runs are safe.
 
@@ -99,29 +148,71 @@ Four flows support the app. Build and test them in order — later flows assume 
 **Trigger:** `PowerApps (V2)` trigger. Add one input parameter: `DocumentId` (Number) — the ID of the Estimate to convert.
 
 **Steps:**
-1. **Get item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId` (the Estimate).
-2. **Create item** (SharePoint) — List: `InvoiceEstimates`:
-   - `Doc Type` = `Invoice`
-   - `Customer` = Customer Id from step 1
-   - `Bill To Snapshot` = from step 1
-   - `Ship To Snapshot` = from step 1 (or leave blank if Estimates don't carry ship-to)
-   - `Doc Date` = `utcNow()` (today, since this is when the invoice is generated)
-   - `Due Date` = `addDays(utcNow(), 30)` (30-day terms; adjust default as needed)
-   - `PO Number` = from step 1
-   - `Status` = `Draft`
-   - `Linked Document` = `DocumentId` (points back to the source Estimate)
-   - `Notes` = from step 1
-   - *(Title/Doc Number left blank — Flow 1's create-trigger will populate it automatically as `INV-####` since `Doc Type = Invoice` on this new item)*
-3. **Get items** (SharePoint) — List: `DocumentLines`, Filter Query: `Document/Id eq {DocumentId}`.
-4. **Apply to each** line from step 3:
-   - **Create item** (SharePoint) — List: `DocumentLines`:
-     - `Document` = new Invoice's Id (from step 2)
-     - `Service`, `Item Label`, `Description`, `Qty`, `Rate`, `Amount`, `Sort Order` = copy directly from the current line
-5. **Update item** (SharePoint) — List: `InvoiceEstimates`, Id: `DocumentId` (the original Estimate), `Status` = `Invoiced`, `Linked Document` = new Invoice's Id (from step 2) — cross-links both directions.
-6. **Respond to PowerApps** — return `NewInvoiceId` (Number, from step 2's Id) so the app can navigate straight to the new invoice.
+1. **Send an HTTP request to SharePoint** — use this instead of **Get item** to fetch the source Estimate's header.
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})?$select=Id,CustomerId,BillToSnapshot,ShipToSnapshot,PONumber,Notes,DocType`
+   - **Headers:** `Accept: application/json;odata=nometadata`
+2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema generated from a sample response (properties: `Id` integer, `CustomerId` integer, `BillToSnapshot`/`ShipToSnapshot`/`PONumber`/`Notes`/`DocType` strings).
+3. **Send an HTTP request to SharePoint** — use this instead of **Create item** to create the new Invoice header.
+   - **Method:** `POST`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items`
+   - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`
+   - **Body:**
+     ```json
+     {
+       "DocType": "Invoice",
+       "CustomerId": @{body('Parse_JSON')?['CustomerId']},
+       "BillToSnapshot": "@{body('Parse_JSON')?['BillToSnapshot']}",
+       "ShipToSnapshot": "@{body('Parse_JSON')?['ShipToSnapshot']}",
+       "DocDate": "@{utcNow()}",
+       "DueDate": "@{addDays(utcNow(), 30)}",
+       "PONumber": "@{body('Parse_JSON')?['PONumber']}",
+       "Status": "Draft",
+       "LinkedDocumentId": @{triggerBody()['DocumentId']},
+       "Notes": "@{body('Parse_JSON')?['Notes']}"
+     }
+     ```
+     *(`Title`/Doc Number left unset — Flow 1's create-trigger will populate it automatically as `INV-####` since `DocType = Invoice` on this new item. `DueDate` defaults to 30-day terms; adjust as needed.)*
+4. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_1')` (the create response), Schema: `{ "type": "object", "properties": { "Id": { "type": "integer" } } }`. This captures the new Invoice's `Id`.
+5. **Send an HTTP request to SharePoint** — use this instead of **Get items** to retrieve the Estimate's line items.
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items?$filter=DocumentId eq @{triggerBody()['DocumentId']}&$select=Id,ServiceId,ItemLabel,Description,Qty,Rate,Amount,SortOrder`
+   - **Headers:** `Accept: application/json;odata=nometadata`
+6. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_2')`, Schema: array under `value` with `Id`, `ServiceId`, `ItemLabel`, `Description`, `Qty`, `Rate`, `Amount`, `SortOrder`.
+7. **Apply to each** — Items: `body('Parse_JSON_2')?['value']`:
+   - **Send an HTTP request to SharePoint** — use this instead of **Create item** to clone each line onto the new Invoice.
+     - **Method:** `POST`
+     - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items`
+     - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`
+     - **Body:**
+       ```json
+       {
+         "DocumentId": @{body('Parse_JSON_1')?['Id']},
+         "ServiceId": @{items('Apply_to_each')?['ServiceId']},
+         "ItemLabel": "@{items('Apply_to_each')?['ItemLabel']}",
+         "Description": "@{items('Apply_to_each')?['Description']}",
+         "Qty": @{items('Apply_to_each')?['Qty']},
+         "Rate": @{items('Apply_to_each')?['Rate']},
+         "Amount": @{items('Apply_to_each')?['Amount']},
+         "SortOrder": @{items('Apply_to_each')?['SortOrder']}
+       }
+       ```
+8. **Send an HTTP request to SharePoint** — use this instead of **Update item** to mark the original Estimate as converted.
+   - **Method:** `PATCH`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})`
+   - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *`
+   - **Body:**
+     ```json
+     {
+       "Status": "Invoiced",
+       "LinkedDocumentId": @{body('Parse_JSON_1')?['Id']}
+     }
+     ```
+     — cross-links both directions (original Estimate → new Invoice, and new Invoice → original Estimate, set in step 3).
+9. **Respond to PowerApps** — return `NewInvoiceId` (Number) = `body('Parse_JSON_1')?['Id']` so the app can navigate straight to the new invoice.
 
 **Notes:**
-- Flow 2 (totals recalculation) will fire automatically as each new `DocumentLines` item is created in step 4 — no need to manually copy Subtotal/Total; they'll self-populate. If you want to avoid N redundant recalculation runs during the copy, you can instead directly copy `Subtotal`/`Total` from the Estimate in step 2 as a shortcut, accepting Flow 2 will simply confirm the same value once the last line is created.
+- Flow 2 (totals recalculation) will fire automatically as each new `DocumentLines` item is created in step 7 — no need to manually copy Subtotal/Total; they'll self-populate. If you want to avoid N redundant recalculation runs during the copy, you can instead directly copy `Subtotal`/`Total` from the Estimate into step 3's body as a shortcut, accepting Flow 2 will simply confirm the same value once the last line is created.
 
 ---
 
@@ -132,14 +223,31 @@ Four flows support the app. Build and test them in order — later flows assume 
 **Trigger:** `PowerApps (V2)` trigger, input: `DocumentId` (Number).
 
 **Steps:**
-1. **Get item** (SharePoint) — `InvoiceEstimates`, Id: `DocumentId`.
-2. **Get items** (SharePoint) — `DocumentLines`, Filter: `Document/Id eq {DocumentId}`, sorted by `Sort Order` (use `$orderby` in the ODataQuery if available, or sort in a subsequent **Apply to each** using a Compose + `sort` array function).
-3. **Populate a Word template** (Word Online / Power Automate action) using a `.docx` template stored in a SharePoint document library, with content controls for Customer, Dates, PO#, and a repeating table row bound to the line items collection.
+1. **Send an HTTP request to SharePoint** — use this instead of **Get item** to fetch the header.
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})?$select=Id,Title,DocType,CustomerId,DocDate,DueDate,PONumber,Notes,Total`
+   - **Headers:** `Accept: application/json;odata=nometadata`
+2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema generated from a sample response.
+3. **Send an HTTP request to SharePoint** — use this instead of **Get items** to fetch the line items, sorted server-side.
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('DocumentLinesListId')}')/items?$filter=DocumentId eq @{triggerBody()['DocumentId']}&$orderby=SortOrder asc&$select=Id,ItemLabel,Description,Qty,Rate,Amount`
+   - **Headers:** `Accept: application/json;odata=nometadata`
+4. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_1')`, Schema: array under `value`.
+5. **Populate a Word template** (Word Online / Power Automate action) using a `.docx` template stored in a SharePoint document library, with content controls for Customer, Dates, PO#, and a repeating table row bound to `body('Parse_JSON_1')?['value']`.
    - Build the template first: create a Word doc styled like the sample Estimate/Invoice, insert content controls (Developer tab → Insert Controls) named to match the flow's field mapping, and save it to a `Templates` library in the same site.
-4. **Convert Word document to PDF** (built-in Power Automate action, no separate connector needed).
-5. **Send an email (V2)** (Office 365 Outlook connector) — To: `Customer.Email` (from a **Get item** on `Customers` using the Customer lookup Id), Subject: `"{Doc Type} {Doc Number} — A&H Lawn Care Services"`, Attachment: PDF from step 4.
-6. **Update item** (SharePoint) — `InvoiceEstimates`, Id: `DocumentId`, `Status` = `Sent`.
-7. **Respond to PowerApps** — return success boolean.
+6. **Convert Word document to PDF** (built-in Power Automate action, no separate connector needed).
+7. **Send an HTTP request to SharePoint** — use this instead of **Get item** on `Customers` to fetch the customer's email.
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('CustomersListId')}')/items(@{body('Parse_JSON')?['CustomerId']})?$select=Id,Email`
+   - **Headers:** `Accept: application/json;odata=nometadata`
+8. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_2')`, Schema: `{ "type": "object", "properties": { "Email": { "type": "string" } } }`.
+9. **Send an email (V2)** (Office 365 Outlook connector — not a SharePoint list action, left as-is) — To: `body('Parse_JSON_2')?['Email']`, Subject: `"@{body('Parse_JSON')?['DocType']} @{body('Parse_JSON')?['Title']} — A&H Lawn Care Services"`, Attachment: PDF from step 6.
+10. **Send an HTTP request to SharePoint** — use this instead of **Update item** to mark the document as sent.
+    - **Method:** `PATCH`
+    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})`
+    - **Headers:** `Accept: application/json;odata=nometadata`, `Content-Type: application/json;odata=nometadata`, `IF-MATCH: *`
+    - **Body:** `{ "Status": "Sent" }`
+11. **Respond to PowerApps** — return success boolean.
 
 ---
 
