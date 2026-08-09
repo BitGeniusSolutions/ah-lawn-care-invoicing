@@ -12,13 +12,20 @@ Four flows support the app. Build and test them in order — later flows assume 
 
 **Steps:**
 1. **Get item** (SharePoint) — Site: same site, List: `InvoiceEstimates`, Id: `ID` from trigger. (Ensures you have the freshly-committed `Doc Type` value; avoids trigger payload timing issues.)
-2. **Condition** — `Doc Type` (from Get item) is equal to `Estimate`.
-   - **If yes:** Compose `DocNumber` = `concat('EST-', formatNumber(triggerOutputs()?['body/ID'], '0000'))`
-   - **If no:** Compose `DocNumber` = `concat('INV-', formatNumber(triggerOutputs()?['body/ID'], '0000'))`
+2. **Compose** `DocNumber` — a single expression (no separate Condition action needed) using `if()`:
+   ```
+   if(
+       equals(outputs('Get_item')?['body/DocType/Value'], 'Estimate'),
+       concat('EST-', formatNumber(triggerOutputs()?['body/ID'], '0000')),
+       concat('INV-', formatNumber(triggerOutputs()?['body/ID'], '0000'))
+   )
+   ```
+   > `equals()` takes two arguments — the value to check and `'Estimate'` — then `if()`'s 2nd/3rd arguments are the true/false results. Replace `Get_item` with your actual action name if it differs (Power Automate uses underscores in place of spaces when referencing actions in expressions).
 3. **Update item** (SharePoint) — Site/List: `InvoiceEstimates`, Id: `ID`, Title: output of the Compose from step 2.
 
 **Notes:**
 - Using the list's internal `ID` guarantees no duplicate numbers even with concurrent creates — no need for a locking/counter pattern.
+- Collapsing the branch into a single Compose (`if()` expression) instead of a Condition action keeps the flow to 3 steps and is easier to read/maintain than duplicating the Compose across Condition branches.
 - If you later want numbers to reset per year (e.g. `EST-2026-0001`), swap the format expression to include `formatDateTime(utcNow(),'yyyy')`.
 - Set flow run-after settings on Update item: run even `has failed` on Get item is not needed — default (only run after success) is fine.
 
