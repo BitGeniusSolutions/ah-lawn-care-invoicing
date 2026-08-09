@@ -21,13 +21,28 @@ Four flows support the app. Build and test them in order — later flows assume 
    )
    ```
    > `equals()` takes two arguments — the value to check and `'Estimate'` — then `if()`'s 2nd/3rd arguments are the true/false results. Replace `Get_item` with your actual action name if it differs (Power Automate uses underscores in place of spaces when referencing actions in expressions).
-3. **Update item** (SharePoint) — Site/List: `InvoiceEstimates`, Id: `ID`, Title: output of the Compose from step 2.
+3. **Send an HTTP request to SharePoint** — use this instead of the **Update item** action to set `Title`. `Update item` re-validates *all* required/mandatory fields on the row (even ones you're not touching) and can throw spurious "required field missing" errors on partially-saved items; a scoped HTTP PATCH only touches the field(s) you specify.
+   - **Site Address:** your site
+   - **Method:** `PATCH`
+   - **Uri:** `_api/web/lists/GetByTitle('InvoiceEstimates')/items(@{triggerOutputs()?['body/ID']})`
+   - **Headers:**
+     - `Accept`: `application/json;odata=nometadata`
+     - `Content-Type`: `application/json;odata=nometadata`
+     - `IF-MATCH`: `*`
+   - **Body:**
+     ```json
+     {
+       "Title": "@{outputs('Compose')}"
+     }
+     ```
+     (Replace `outputs('Compose')` with your actual Compose action name if renamed.)
 
 **Notes:**
 - Using the list's internal `ID` guarantees no duplicate numbers even with concurrent creates — no need for a locking/counter pattern.
 - Collapsing the branch into a single Compose (`if()` expression) instead of a Condition action keeps the flow to 3 steps and is easier to read/maintain than duplicating the Compose across Condition branches.
+- The HTTP PATCH approach avoids `Update item`'s behavior of re-validating the entire row against required-field rules on every update — since this flow only needs to set `Title`, a scoped PATCH is more reliable, especially before other required fields (e.g. `Customer`, `Doc Date`) may have been filled in yet by the user in Power Apps.
 - If you later want numbers to reset per year (e.g. `EST-2026-0001`), swap the format expression to include `formatDateTime(utcNow(),'yyyy')`.
-- Set flow run-after settings on Update item: run even `has failed` on Get item is not needed — default (only run after success) is fine.
+- No "run after" configuration is needed for the HTTP action beyond the default (only run after Compose succeeds).
 
 ---
 
