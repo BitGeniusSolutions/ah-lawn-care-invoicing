@@ -165,8 +165,13 @@ This is the "pure form control" pattern — repeat identically for Services.
   ```
   (Add the Power Automate flow as a data source first: **Power Automate** pane → Add flow → select `DOC - Convert Estimate to Invoice`.)
 
-### 5.4 Send PDF button (optional, once Flow 4 exists)
-- `OnSelect`: `'DOC - Generate and Send PDF'.Run(varCurrentDoc.ID); Notify("Sent to customer", NotificationType.Success)`
+### 5.4 Generate PDF button (optional, once Flow 4 exists)
+- `OnSelect`:
+  ```
+  Set(varPdfResult, 'DOC - Generate Document PDF'.Run(varCurrentDoc.ID));
+  Launch(varPdfResult.PdfUrl)
+  ```
+  `Launch()` opens the PDF's SharePoint library URL in a new browser tab/window, where the user can view it and use their browser's built-in controls to print, download, or save it — the app itself does no emailing or status changes; the flow doesn't touch `Status`.
 
 ---
 
@@ -188,7 +193,7 @@ HomeScreen ──▶ CustomerListScreen ──▶ CustomerFormScreen
 - [ ] Delete a line item — confirm gallery updates and footer total recalculates
 - [ ] Wait a few seconds, refresh InvoiceEstimates list — confirm `Subtotal`/`Total` on the header match (Flow 2 working)
 - [ ] Click "Convert to Invoice" on a test Estimate — confirm new Invoice created with cloned lines, correct Doc Number prefix, `Linked Document` set both directions, original Estimate Status = `Invoiced`
-- [ ] (If built) Click "Send PDF" — confirm email arrives with correctly formatted PDF, Status updates to `Sent`
+- [ ] (If built) Click "Generate PDF" — confirm a correctly formatted PDF opens in a new browser tab from the SharePoint library link, with no email sent and `Status` unchanged
 
 ---
 

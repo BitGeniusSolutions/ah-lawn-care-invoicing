@@ -284,9 +284,9 @@ PATCH (update an item):
 
 ---
 
-## Flow 4 (Optional): Generate & Email PDF
+## Flow 4 (Optional): Generate Document PDF
 
-**Purpose:** Produce a PDF matching the paper layout and email it to the customer; update Status to `Sent`.
+**Purpose:** Produce a PDF matching the paper layout and make it available for the user to view/download from Power Apps. This flow does **not** email or change `Status` — printing and sending to the customer is a manual step the user does themselves after reviewing the PDF.
 
 **Trigger:** `PowerApps (V2)` trigger, input: `DocumentId` (Number).
 
@@ -314,35 +314,20 @@ PATCH (update an item):
 5. **Populate a Word template** (Word Online / Power Automate action) using a `.docx` template stored in a SharePoint document library, with content controls for Customer, Dates, PO#, and a repeating table row bound to `body('Parse_JSON_1')?['value']`.
    - Build the template first: create a Word doc styled like the sample Estimate/Invoice, insert content controls (Developer tab → Insert Controls) named to match the flow's field mapping, and save it to a `Templates` library in the same site.
 6. **Convert Word document to PDF** (built-in Power Automate action, no separate connector needed).
-7. **Send an HTTP request to SharePoint** — use this instead of **Get item** on `Customers` to fetch the customer's email.
-   - **Method:** `GET`
-   - **Uri:** `_api/web/lists(guid'@{variables('CustomersListId')}')/items(@{body('Parse_JSON')?['CustomerId']})?$select=Id,Email`
-   - **Headers:**
-     ```json
-     {
-       "Accept": "application/json;odata=nometadata"
-     }
-     ```
-8. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint_2')`, Schema: `{ "type": "object", "properties": { "Email": { "type": "string" } } }`.
-9. **Send an email (V2)** (Office 365 Outlook connector — not a SharePoint list action, left as-is) — To: `body('Parse_JSON_2')?['Email']`, Subject: `"@{body('Parse_JSON')?['DocType']} @{body('Parse_JSON')?['Title']} — A&H Lawn Care Services"`, Attachment: PDF from step 6.
-10. **Send an HTTP request to SharePoint** — use this instead of **Update item** to mark the document as sent.
-    - **Method:** `PATCH`
-    - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items(@{triggerBody()['DocumentId']})`
-    - **Headers:**
-      ```json
-      {
-        "Accept": "application/json;odata=nometadata",
-        "Content-Type": "application/json;odata=nometadata",
-        "IF-MATCH": "*"
-      }
-      ```
-    - **Body:**
-      ```json
-      {
-        "Status": "Sent"
-      }
-      ```
-11. **Respond to PowerApps** — return success boolean.
+7. **Create file** (SharePoint) — save the PDF to a document library so it has a stable, shareable URL. (This one native action is kept as-is rather than converted to raw HTTP — file/library uploads require multipart binary handling that the native connector manages for you far more simply than a raw HTTP PUT/POST would.)
+   - **Site Address:** your site
+   - **Folder Path:** `/GeneratedDocuments` (create this document library once, ahead of time)
+   - **File Name:** `@{body('Parse_JSON')?['Title']}.pdf` (e.g. `EST-0148.pdf` / `INV-2835.pdf`)
+   - **File Content:** output of step 6 (Convert Word document to PDF)
+   - Set **If file already exists** behavior to overwrite, so re-generating a PDF for the same document replaces the old copy rather than erroring or duplicating.
+8. **Respond to PowerApps** — return:
+   - `PdfUrl` (Text) = `concat(variables('SiteUrl'), '/GeneratedDocuments/', body('Parse_JSON')?['Title'], '.pdf')` — a direct link the app can open in a browser tab or PDF viewer control for viewing/downloading.
+   - `DocTitle` (Text) = `body('Parse_JSON')?['Title']` — handy for labeling the link/button in the app.
+
+**Notes:**
+- No email step and no `Status` update — the app simply shows/opens the generated PDF; the user decides when and how to send or print it.
+- Because step 7 overwrites on re-run, clicking "Generate PDF" again after editing line items produces an up-to-date file at the same URL — no cleanup needed.
+- In Power Apps, wire the button that calls this flow to open the returned `PdfUrl` (e.g. `Launch(pdfUrl)` to open it in a new browser tab, where the user can view, print, or save/download it using their browser's built-in PDF controls) — see the Power Apps guide for the exact formula.
 
 ---
 
@@ -357,4 +342,4 @@ Name flows clearly for future maintenance:
 - `DOC - Generate Document Number`
 - `DOC - Recalculate Totals`
 - `DOC - Convert Estimate to Invoice`
-- `DOC - Generate and Send PDF`
+- `DOC - Generate Document PDF`

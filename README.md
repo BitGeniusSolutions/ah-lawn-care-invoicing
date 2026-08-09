@@ -6,7 +6,7 @@ Documentation and design artifacts for a simple Power Platform (Power Apps + Sha
 
 - [`docs/Invoicing-App-Design.md`](docs/Invoicing-App-Design.md) — Overall design document: SharePoint list schema (Customers, Services, InvoiceEstimates, DocumentLines), Power Apps screen structure, Power Automate flow plan, and confirmed scope decisions.
 - [`docs/SharePoint-Implementation.md`](docs/SharePoint-Implementation.md) — Step-by-step build guide for the 4 SharePoint lists (columns, types, choice values, lookups, indexing, views, permissions).
-- [`docs/PowerAutomate-Implementation.md`](docs/PowerAutomate-Implementation.md) — Build guide for the 4 flows: document numbering, totals recalculation, Estimate→Invoice conversion, and optional PDF/email.
+- [`docs/PowerAutomate-Implementation.md`](docs/PowerAutomate-Implementation.md) — Build guide for the 4 flows: document numbering, totals recalculation, Estimate→Invoice conversion, and optional PDF generation (view/download only, no email).
 - [`docs/PowerApps-Implementation.md`](docs/PowerApps-Implementation.md) — Screen-by-screen Canvas app build guide with concrete formulas for forms, the editable line-items gallery, and navigation.
 
 ## Project Summary
