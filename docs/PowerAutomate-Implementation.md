@@ -1,6 +1,6 @@
 # Power Automate Implementation Guide — A&H Lawn Care Invoicing
 
-Four flows support the app. Build and test them in order — later flows assume earlier ones exist and work.
+Five flows support the app. Build and test them in order — later flows assume earlier ones exist and work.
 
 ## Conventions Used Throughout This Guide
 
@@ -441,11 +441,53 @@ In Power Apps, parse the returned `response` text with `ParseJSON()` and branch 
 
 ---
 
+## Flow 5: Get Invoice Estimates
+
+**Purpose:** Return every `InvoiceEstimates` row (with the `Customer` display name already joined in) to Power Apps in one call, so the app can cache it in a local collection and filter/search/count against that collection instead of `Filter()`-ing the SharePoint data source directly. This is what eliminates the delegation warnings on `DocumentListScreen`/`HomeScreen` — `Filter()` and `CountRows()` against an in-memory collection are never subject to SharePoint's delegation limits, and it also gives you a single place to build "advanced search" logic without fighting OData `$filter` syntax for every new search field.
+
+**Trigger:** `PowerApps (V2)` trigger. No inputs needed — this flow always returns the full list; all filtering/searching happens client-side against the returned collection (see the Power Apps guide's Data Loading Pattern).
+
+**Steps (inside a `Try` scope):**
+1. **Send an HTTP request to SharePoint** — fetch all rows, expanding the `Customer` lookup so its display name comes back in the same call (avoids a separate lookup per row in the app).
+   - **Method:** `GET`
+   - **Uri:** `_api/web/lists(guid'@{variables('InvoiceEstimatesListId')}')/items?$select=Id,Title,DocType,CustomerId,Customer/Title,DocDate,DueDate,PONumber,Status,Subtotal,Total,Notes&$expand=Customer&$orderby=DocDate desc&$top=5000`
+   - **Headers:**
+     ```json
+     {
+       "Accept": "application/json;odata=nometadata"
+     }
+     ```
+   - `$top=5000` returns everything in a single page for a list of this size (a lawn care business's estimates/invoices won't approach that in years). If you ever expect more than ~5000 rows, this would need `$skiptoken`-based paging (an Apply-to-each loop following the `@odata.nextLink`) — not needed for this app.
+2. **Parse JSON** — Content: `body('Send_an_HTTP_request_to_SharePoint')`, Schema: array under `value` with `Id`, `Title`, `DocType`, `CustomerId`, `Customer` (object with `Title`), `DocDate`, `DueDate`, `PONumber`, `Status`, `Subtotal`, `Total`, `Notes`.
+3. **Respond to PowerApps** — return a single output `response` (Text):
+   ```json
+   {
+     "success": true,
+     "data": @{body('Parse_JSON')?['value']}
+   }
+   ```
+
+**Catch scope** (Run After: `Try` has failed, timed out, or is skipped) — single **Respond to PowerApps** action:
+```json
+{
+  "success": false,
+  "data": []
+}
+```
+
+**Notes:**
+- `data` is a JSON array here (not a single object like Flows 3/4) — note the `[]` (not `""`) in the Catch response so Power Apps' `ForAll` over `.data` doesn't choke on an empty string when the flow fails.
+- See the "Standard response envelope" convention above for the `Try`/`Catch` scope pattern.
+- The Detail screen (section 5 of the Power Apps guide) still reads/writes `InvoiceEstimates` directly via `LookUp`/Form control for a single record — only the *list/search* screens route through this flow's cached collection. Keep this flow's `$select` list in sync if you add columns you want to filter/search/display in the list screen.
+
+---
+
 ## Build & Test Order
 1. Build and test Flow 1 in isolation — create a test Estimate and Invoice manually in SharePoint, confirm Doc Number populates correctly for both types.
 2. Build and test Flow 2 — manually add/edit/delete DocumentLines rows against your test Document, confirm Subtotal/Total update correctly, including after a delete.
 3. Build Flow 3 only once Power Apps has a working "Convert to Invoice" button to call it from (or test via Power Automate's built-in "Test" pane with a manually supplied `DocumentId`).
 4. Build Flow 4 last, once the app and core flows are stable — it depends on a Word template that takes extra design time.
+5. Build Flow 5 once you're ready to wire up `HomeScreen`/`DocumentListScreen` — test it via Power Automate's "Test" pane first and confirm the `response` output contains the expected array before wiring it into the app.
 
 ## Naming Convention
 Name flows clearly for future maintenance:
@@ -453,3 +495,4 @@ Name flows clearly for future maintenance:
 - `DOC - Recalculate Totals`
 - `DOC - Convert Estimate to Invoice`
 - `DOC - Generate Document PDF`
+- `DOC - Get Invoice Estimates`

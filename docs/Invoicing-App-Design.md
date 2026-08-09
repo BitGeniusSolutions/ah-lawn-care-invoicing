@@ -74,10 +74,10 @@ Based on the sample InvoiceEstimates provided:
 ## 3. Power Apps Structure
 
 ### Screens
-1. **HomeScreen** — Dashboard: counts of Draft estimates, Unpaid invoices; buttons to "New Estimate", "New Invoice", browse Customers/Services.
+1. **HomeScreen** — Dashboard: HTML banner header + card-driven counts (Drafts, Open Invoices, Recent Estimates/Invoices last 30 days), all computed from a locally cached collection (not live SharePoint queries — see §4.5); buttons to "New Estimate", "New Invoice", browse Customers/Services.
 2. **CustomerListScreen / CustomerFormScreen** — Standard SharePoint **Form control** (New/View/Edit) bound to `Customers`.
 3. **ServiceListScreen / ServiceFormScreen** — Standard **Form control** bound to `Services`.
-4. **DocumentListScreen** — Gallery of `InvoiceEstimates`, filterable by DocType/Status/Customer.
+4. **DocumentListScreen** — Gallery of `InvoiceEstimates` (via the cached collection, §4.5), filterable by DocType/Status/date range with a free-text search box across Doc Number/Customer/PO Number/Notes.
 5. **DocumentDetailScreen** — **Form control** for the header fields (Customer, Date, PO#, Status, Notes) + a **line-items section** below:
    - Editable/scrollable gallery bound to `Filter(DocumentLines, Document.ID = ThisItem.ID)`, sorted by SortOrder.
    - Each row: Service combo box (optional), ItemLabel/Description text inputs, Qty, Rate, read-only Amount label.
@@ -96,6 +96,10 @@ The built-in Form control is 1 form = 1 list item, so it's perfect for Customers
 2. **On DocumentLines create/update/delete** — Recalculate parent Document's Subtotal/Total (no tax to compute).
 3. **Convert Estimate → Invoice** (button-triggered) — Clone header + lines into a new Invoice-type Document, set LinkedDocument, set Estimate Status = Invoiced.
 4. **(Optional) Generate Document PDF** — Build an HTML representation of the document, save it to the user's OneDrive, convert it to PDF (OneDrive's built-in HTML→PDF conversion), and return a link the app opens for the user to view/download. No email is sent and no Status change — the user handles printing/sending manually.
+5. **Get Invoice Estimates** (button/App.OnStart-triggered) — Return every `InvoiceEstimates` row (Customer name pre-joined) in one call so the app can cache it in a local collection; the dashboard and list/search screens filter/count against that collection instead of querying SharePoint directly, which avoids delegation limits entirely and gives a single place to build free-text/advanced search (§4.5).
+
+### 4.5 Why a "get everything" flow instead of direct SharePoint queries
+`InvoiceEstimates` mixes Choice fields, `Or` conditions, and date-range/aggregate logic across the dashboard and list screens — exactly the shape of formula that SharePoint's Power Apps connector can't delegate, meaning `Filter()`/`CountRows()` against the live list silently only consider the first few hundred/thousand rows once the list grows. Flow 5 fetches the full list once (small business volume — this will never approach a problematic size) and the app caches it as a plain collection; filtering, counting, and free-text search all run against that in-memory collection, which has no delegation limit at all. The collection is refreshed on app start and after any create/update/convert action so it doesn't go stale — see the Power Apps guide, §0.5, for the exact mechanics.
 
 ---
 
@@ -105,8 +109,9 @@ The built-in Form control is 1 form = 1 list item, so it's perfect for Customers
 3. Build InvoiceEstimates list screens: gallery + header Form control.
 4. Add DocumentLines gallery/Patch logic on the detail screen.
 5. Add the numbering + totals-calculation flows.
-6. Add PDF generation flow (view/download only — no email).
-7. (Later) Convert-to-Invoice flow once basic CRUD is solid.
+6. Add the "Get Invoice Estimates" flow and wire up the cached-collection pattern for HomeScreen/DocumentListScreen — do this before spending time on dashboard/search polish, since it changes the data source those screens filter against.
+7. Add PDF generation flow (view/download only — no email).
+8. (Later) Convert-to-Invoice flow once basic CRUD is solid.
 
 ---
 
